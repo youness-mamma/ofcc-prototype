@@ -770,6 +770,68 @@ func e3(args []string) {
 		"rows": rows})
 }
 
+// ---------------------------------------------------------------- clock bound (V4)
+
+func eclock(args []string) {
+	fs := flag.NewFlagSet("eclock", flag.ExitOnError)
+	var c common
+	c.flags(fs)
+	rounds := fs.Int("rounds", 10, "")
+	fs.Parse(args)
+	cs := conns(c.crypto)
+	c.system = "ofcc"
+	bucket := bucketName(fmt.Sprintf("eclock-%d", c.seed))
+	sys, mode, _ := newSystem(&c, cs, bucket)
+	skews := []struct {
+		name string
+		ns   int64
+	}{{"within_bound_plus3s", 3e9}, {"forward_plus1h", 3600e9}, {"backward_minus1h", -3600e9}, {"none", 0}}
+	wr := rand.New(rand.NewSource(c.seed))
+	t0 := time.Now().Add(-30 * time.Minute).UnixNano()
+	type row struct {
+		Gateway  string `json:"gateway"`
+		SkewSec  int64  `json:"skew_s"`
+		Items    int    `json:"items"`
+		Flagged  int    `json:"time_flagged"`
+	}
+	var rows []row
+	for i, s := range skews {
+		g := sim.New(i, mode, c.seed, salt(bucket))
+		g.ClockSkew = s.ns
+		must(sys.Register(g))
+		vt := t0
+		n := 0
+		for r := 0; r < *rounds; r++ {
+			recs := make([]*sim.Record, 20+wr.Intn(41))
+			for j := range recs {
+				vt += int64(time.Second)
+				recs[j] = g.Capture(vt)
+			}
+			n += len(recs)
+			_, err := sys.Sync(g, recs, r, c.b)
+			must(err)
+		}
+		ib, err := cs.Auditor.Evaluate("GetItems", g.Pg)
+		must(err)
+		var items []struct {
+			TF bool `json:"tf"`
+		}
+		must(json.Unmarshal(ib, &items))
+		f := 0
+		for _, it := range items {
+			if it.TF {
+				f++
+			}
+		}
+		rows = append(rows, row{Gateway: s.name, SkewSec: s.ns / 1e9, Items: n, Flagged: f})
+		fmt.Printf("eclock %s items=%d flagged=%d\n", s.name, n, f)
+	}
+	writeJSON(c.out, fmt.Sprintf("eclock_seed%d.json", c.seed), map[string]any{"exp": "eclock", "seed": c.seed, "env": env(),
+		"config": map[string]any{"eps_s": 10, "delta_s": 5, "b": c.b, "batch_timeout": c.batchTimeout, "rounds": *rounds,
+			"note": "capture times lie in the past (virtual clock); forward skew beyond 2eps+delta of ledger time is flagged; constant backward skew is not"},
+		"rows": rows})
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("usage: bench bootstrap|clserver|e1|e2|e3 ...")
@@ -790,6 +852,8 @@ func main() {
 		e2(os.Args[2:])
 	case "e3":
 		e3(os.Args[2:])
+	case "eclock":
+		eclock(os.Args[2:])
 	default:
 		fmt.Println("unknown command")
 		os.Exit(2)

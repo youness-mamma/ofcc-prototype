@@ -48,6 +48,8 @@ type Gateway struct {
 	// protected state (A2): last sequence number and last chain hash; the tamper tool cannot write these.
 	K  int64
 	Hk string
+	// ClockSkew is added to every capture timestamp (clock-bound experiment).
+	ClockSkew int64
 }
 
 // New creates gateway idx. The workload (payload contents) depends only on (seed, idx), so all
@@ -99,6 +101,7 @@ func (g *Gateway) Encrypt(p []byte) []byte {
 
 // Capture creates the next evidence item at virtual time t and updates the protected state.
 func (g *Gateway) Capture(t int64) *Record {
+	t += g.ClockSkew
 	g.count++
 	p, kind := g.payload(g.count, t)
 	c := p
@@ -135,3 +138,13 @@ func (g *Gateway) Header() *model.Header {
 
 // Rng exposes the gateway's deterministic random source.
 func (g *Gateway) Rng() *rand.Rand { return g.rng }
+
+// HeaderFromStore signs a header built from the last record of the (tamperable) store: the
+// OFCC-noProt ablation, where the sync agent has no protected counter.
+func (g *Gateway) HeaderFromStore(last *Record) *model.Header {
+	if last == nil || !(g.Mode.Sig && g.Mode.Seq) {
+		return nil
+	}
+	hk := model.EntryHash(g.Pg, last.Entry())
+	return &model.Header{K: last.Seq, Hk: hk, Sig: model.Sign(g.Priv, model.HeaderBytes(g.Pg, last.Seq, hk))}
+}

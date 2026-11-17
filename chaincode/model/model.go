@@ -17,11 +17,12 @@ type Mode struct {
 	Sig   bool   `json:"sig"`   // entries and headers are Ed25519-signed
 	Seq   bool   `json:"seq"`   // entries carry sequence numbers and the signed header carries k
 	Enc   bool   `json:"enc"`   // payloads are encrypted before upload (affects cost only)
+	Prot  bool   `json:"prot"`  // header (k, h_k) comes from the protected state (A2)
 }
 
 // ModeByName returns the mechanism flags of each configuration.
 func ModeByName(n string) (Mode, error) {
-	m := Mode{Name: n, Chain: true, Sig: true, Seq: true, Enc: true}
+	m := Mode{Name: n, Chain: true, Sig: true, Seq: true, Enc: true, Prot: true}
 	switch n {
 	case "ofcc":
 	case "noChain":
@@ -32,6 +33,8 @@ func ModeByName(n string) (Mode, error) {
 		m.Seq = false
 	case "noEnc":
 		m.Enc = false
+	case "noProt": // header built from the (tamperable) local store instead of the protected state
+		m.Prot = false
 	case "ha":
 		m = Mode{Name: "ha", Enc: true}
 	default:

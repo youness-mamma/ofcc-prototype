@@ -31,10 +31,12 @@ jobs:
         run: ./bin/bench bootstrap
       - name: E1 tiny, all systems
         run: |
-          for s in ofcc noChain noSig noSeq noEnc ha cl; do
+          for s in ofcc noChain noSig noSeq noEnc noProt ha cl; do
             ./bin/bench e1 -system $s -seed 101 -adversary adaptive -rounds 16 -pre 2 -post 2 -gws 3 -minio-data minio-data
           done
           for s in ofcc ha cl; do ./bin/bench e1 -system $s -seed 101 -adversary naive -rounds 16 -pre 2 -post 2 -gws 3 -minio-data minio-data; done
+      - name: Clock bound tiny
+        run: ./bin/bench eclock -seed 101 -rounds 2
       - name: E2 tiny
         run: for s in ofcc ha cl; do ./bin/bench e2 -system $s -seed 101 -outages 1 -gws 3; done
       - name: E3 tiny

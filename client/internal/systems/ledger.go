@@ -92,7 +92,11 @@ func (l *Ledger) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (Syn
 		for i, ch := range cs {
 			bt := model.Batch{Pg: g.Pg, Entries: ch}
 			if i == len(cs)-1 {
-				bt.Header = g.Header() // from the protected state, not from the store
+				if l.Mode.Prot {
+					bt.Header = g.Header() // from the protected state, not from the store
+				} else if len(recs) > 0 {
+					bt.Header = g.HeaderFromStore(recs[len(recs)-1])
+				}
 			}
 			bb, _ := json.Marshal(bt)
 			parts = append(parts, string(bb))

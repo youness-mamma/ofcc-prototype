@@ -46,7 +46,7 @@ jobs:
         if: matrix.part == 'e1e2'
         run: |
           ./network/up.sh 4 $BT 100 && ./bin/bench bootstrap
-          for s in ofcc noChain noSig noSeq noEnc ha cl; do
+          for s in ofcc noChain noSig noSeq noEnc noProt ha cl; do
             ./bin/bench e1 -system $s -seed ${{ matrix.seed }} -adversary adaptive -b $B -bt $BT -minio-data minio-data -out results/raw/test
           done
           for s in ofcc ha cl; do
@@ -55,6 +55,7 @@ jobs:
           for s in ofcc ha cl; do
             ./bin/bench e2 -system $s -seed ${{ matrix.seed }} -b $B -bt $BT -out results/raw/test
           done
+          ./bin/bench eclock -seed ${{ matrix.seed }} -b $B -bt $BT -out results/raw/test
       - name: E3 systems compared (4 orgs)
         if: matrix.part == 'e3'
         run: |

@@ -8,7 +8,7 @@ env:
   FABRIC_CA_VERSION: "1.5.22"
   INSTALL_SCRIPT_SHA: "f1f5e006a6301b5c98611b24a7ec4aeeda6c283a"   # hyperledger/fabric scripts/install-fabric.sh
   SAMPLES_SHA: "5789681b4f4d24e58fa40f19a69f5496892374b6"          # hyperledger/fabric-samples
-  MINIO_IMAGE: "quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z"
+  MINIO_RELEASE: "RELEASE.2025-10-15T17-29-55Z"   # official images discontinued; built from pinned source
 
 jobs:
   smoke:
@@ -55,9 +55,14 @@ jobs:
           peer chaincode query -C mychannel -n basic -c '{"Args":["GetAllAssets"]}' | tee ../../out/query.json
           test -s ../../out/query.json && echo "INVOKE_AND_QUERY_OK" | tee -a ../../out/runner.txt
 
-      - name: MinIO
+      - name: MinIO (built from pinned official source, run natively)
         run: |
-          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=smoke -e MINIO_ROOT_PASSWORD=smokesmoke "$MINIO_IMAGE" server /data
+          start=$(date +%s)
+          GOBIN=$PWD/minio-bin go install "github.com/minio/minio@${MINIO_RELEASE}"
+          echo "minio_build_seconds=$(( $(date +%s) - start ))" | tee -a out/runner.txt
+          ./minio-bin/minio --version | head -1 | tee -a out/runner.txt
+          mkdir -p minio-data
+          MINIO_ROOT_USER=smoke MINIO_ROOT_PASSWORD=smokesmoke nohup ./minio-bin/minio server minio-data --address :9000 > minio.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
           curl -sf http://localhost:9000/minio/health/live && echo "MINIO_OK" | tee -a out/runner.txt
 

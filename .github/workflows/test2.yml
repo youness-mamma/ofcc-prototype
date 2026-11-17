@@ -1,0 +1,75 @@
+name: test2
+# Revision after review round 1: adds the signed centralized log (cls), custody attacks, adaptive
+# timestamp rewriting, item-level detection, and a benign link-loss experiment. Test seeds 1-5,
+# configuration selected on validation seeds (b=100, batch timeout 0.5s). E1/E2/E3 rerun so that all
+# compared systems for a seed share one runner. Org scaling and the clock test are unchanged (run test).
+on:
+  workflow_dispatch:
+    inputs:
+      b:
+        default: "100"
+      bt:
+        default: "0.5s"
+
+env:
+  FABRIC_VERSION: "2.5.16"
+  FABRIC_CA_VERSION: "1.5.22"
+  INSTALL_SCRIPT_SHA: "f1f5e006a6301b5c98611b24a7ec4aeeda6c283a"
+  MINIO_RELEASE: "RELEASE.2025-10-15T17-29-55Z"
+  B: ${{ github.event.inputs.b }}
+  BT: ${{ github.event.inputs.bt }}
+  LOADS: "50,100,200,400,800,1600"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [1, 2, 3, 4, 5]
+        part: [e1e2, e3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: client/go.sum
+      - uses: actions/cache@v4
+        with:
+          path: minio-bin
+          key: minio-${{ env.MINIO_RELEASE }}
+      - name: Setup
+        run: ./.github/actions-setup.sh
+      - name: E1 + E2 + link loss (4 orgs)
+        if: matrix.part == 'e1e2'
+        run: |
+          ./network/up.sh 4 $BT 100 && ./bin/bench bootstrap
+          for s in ofcc noChain noSig noSeq noEnc noProt ha cl cls; do
+            ./bin/bench e1 -system $s -seed ${{ matrix.seed }} -adversary adaptive -b $B -bt $BT -minio-data minio-data -out results/raw/test2
+          done
+          for s in ofcc ha cl cls; do
+            ./bin/bench e1 -system $s -seed ${{ matrix.seed }} -adversary naive -b $B -bt $BT -minio-data minio-data -out results/raw/test2
+          done
+          for s in ofcc ha cl cls; do
+            ./bin/bench e2 -system $s -seed ${{ matrix.seed }} -b $B -bt $BT -out results/raw/test2
+          done
+          ./bin/bench eloss -system ofcc -seed ${{ matrix.seed }} -b $B -bt $BT -out results/raw/test2
+      - name: E3 systems compared (4 orgs)
+        if: matrix.part == 'e3'
+        run: |
+          ./network/up.sh 4 $BT 100 && ./bin/bench bootstrap
+          for s in ofcc ha cl cls; do
+            ./bin/bench e3 -system $s -seed ${{ matrix.seed }} -loads $LOADS -b $B -bt $BT -out results/raw/test2
+            df -h / | tail -1
+          done
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker ps -a --format '{{.Names}} {{.Status}}'; df -h /
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'peer0.org1|orderer0'); do echo "== $c"; docker logs --tail 40 $c 2>&1; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test2-${{ matrix.part }}-seed${{ matrix.seed }}
+          path: results/raw/

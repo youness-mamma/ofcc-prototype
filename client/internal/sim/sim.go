@@ -115,6 +115,11 @@ func (g *Gateway) Capture(t int64) *Record {
 		r.Seq = g.seq // unsigned local counter
 		return r
 	}
+	if g.Mode.Name == "cls" { // signed centralized log: per-record signature over (p_g, seq, t, d)
+		r.Seq = g.seq
+		r.Sig = model.Sign(g.Priv, []byte(model.EntryHash(g.Pg, r.Entry())))
+		return r
+	}
 	if g.Mode.Seq {
 		r.Seq = g.seq
 	}

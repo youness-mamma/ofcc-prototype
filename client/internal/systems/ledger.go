@@ -120,7 +120,7 @@ func (l *Ledger) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (Syn
 		var evs []model.Event
 		_ = json.Unmarshal(res, &evs)
 		for _, e := range evs {
-			out.Alerts = append(out.Alerts, Alert{GW: g.Idx, Round: round, Orig: -1, Kind: e.Type})
+			out.Alerts = append(out.Alerts, Alert{GW: g.Idx, Round: round, Orig: -1, Kind: e.Type, Seq: e.Seq, From: e.From, To: e.To})
 		}
 	}
 	// track the public anchored head (needed by an adaptive adversary)
@@ -213,7 +213,7 @@ func (l *Ledger) Transfer(g *sim.Gateway, r *sim.Record) error {
 }
 
 func (l *Ledger) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
-	out := VerifyOut{Complete: map[int]map[int64]bool{}}
+	out := VerifyOut{Complete: map[int]map[int64]bool{}, CustodyBroken: map[int]map[int64]bool{}}
 	for _, g := range gws {
 		items, evs, err := getLedger(l.C.Auditor, g.Pg)
 		if err != nil {
@@ -259,7 +259,16 @@ func (l *Ledger) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 			if l.Mode.Seq && badSeq[it.Seq] && l.Mode.Name != "ha" {
 				bad = true
 			}
-			if it.TimeFlag || !custodyOK(it, collector) {
+			if !custodyOK(it, collector) {
+				bad = true
+				if o >= 0 {
+					if out.CustodyBroken[g.Idx] == nil {
+						out.CustodyBroken[g.Idx] = map[int64]bool{}
+					}
+					out.CustodyBroken[g.Idx][o] = true
+				}
+			}
+			if it.TimeFlag {
 				bad = true
 			}
 			if o >= 0 && !bad {
@@ -298,3 +307,23 @@ func (l *Ledger) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 
 // OffchainBytes returns the bytes held in this run's bucket.
 func (l *Ledger) OffchainBytes() int64 { n, _ := l.St.Size(); return n }
+
+// CustodyAttack: "forge" = an identity that is not the current custodian submits a transfer;
+// the chaincode must reject it. "rewrite" = change committed custody history, which a single
+// organization cannot do without a majority of endorsers (A4): prevented by construction.
+func (l *Ledger) CustodyAttack(kind string, g *sim.Gateway, r *sim.Record, adaptive bool) (string, error) {
+	switch kind {
+	case "forge":
+		_, _, _, err := l.C.Investigator2.Submit("TransferCustody", g.Pg, l.itemID(g, r), investigator2)
+		if err != nil {
+			if strings.Contains(err.Error(), "not the current custodian") {
+				return "prevented", nil
+			}
+			return "", err
+		}
+		return "accepted", nil
+	case "rewrite":
+		return "prevented", nil
+	}
+	return "", fmt.Errorf("unknown custody attack %s", kind)
+}

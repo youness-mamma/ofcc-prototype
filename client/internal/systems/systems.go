@@ -24,6 +24,9 @@ type Alert struct {
 	Orig  int64  `json:"orig"`  // -1 if unknown
 	Key   string `json:"key,omitempty"`
 	Kind  string `json:"kind"`
+	Seq   int64  `json:"seq,omitempty"`  // sequence number named by the alert (ledger events)
+	From  int64  `json:"from,omitempty"` // gap range
+	To    int64  `json:"to,omitempty"`
 }
 
 // SyncOut is the result of one synchronization.
@@ -75,8 +78,9 @@ func (t *Truth) roundOf(gw int, o int64) int {
 
 // VerifyOut is the verifier's output.
 type VerifyOut struct {
-	Alerts   []Alert
-	Complete map[int]map[int64]bool // gw -> orig -> custody complete
+	Alerts        []Alert
+	Complete      map[int]map[int64]bool // gw -> orig -> custody complete
+	CustodyBroken map[int]map[int64]bool // gw -> orig -> custody history inconsistent
 }
 
 // System is implemented by OFCC (all modes), HA and CL.
@@ -87,6 +91,7 @@ type System interface {
 	Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (SyncOut, error)
 	Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, adaptive bool, rng *rand.Rand) error
 	Transfer(g *sim.Gateway, r *sim.Record) error
+	CustodyAttack(kind string, g *sim.Gateway, r *sim.Record, adaptive bool) (string, error)
 	Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error)
 }
 

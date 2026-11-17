@@ -47,7 +47,7 @@ func (c *common) flags(fs *flag.FlagSet) {
 	fs.StringVar(&c.minioPass, "minio-pass", "ofccadmin-secret", "")
 	fs.StringVar(&c.minioData, "minio-data", "minio-data", "MinIO data dir (for storage)")
 	fs.StringVar(&c.out, "out", "results/raw", "output dir")
-	fs.StringVar(&c.system, "system", "ofcc", "ofcc|noChain|noSig|noSeq|noEnc|ha|cl")
+	fs.StringVar(&c.system, "system", "ofcc", "ofcc|noChain|noSig|noSeq|noEnc|noProt|ha|cl|cls")
 	fs.Int64Var(&c.seed, "seed", 1, "seed")
 	fs.IntVar(&c.b, "b", 100, "batch size (entries per transaction)")
 	fs.IntVar(&c.gws, "gws", 8, "number of gateways")
@@ -106,7 +106,7 @@ type clProc struct {
 	db  string
 }
 
-func startCL(dir string) (*clProc, *systems.CL) {
+func startCL(dir string, signed bool) (*clProc, *systems.CL) {
 	self, _ := os.Executable()
 	db := filepath.Join(dir, fmt.Sprintf("cl-%d.jsonl", time.Now().UnixNano()))
 	cmd := exec.Command(self, "clserver", "-addr", "127.0.0.1:7070", "-db", db)
@@ -119,7 +119,7 @@ func startCL(dir string) (*clProc, *systems.CL) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return &clProc{cmd: cmd, db: db}, systems.NewCL("http://127.0.0.1:7070", db)
+	return &clProc{cmd: cmd, db: db}, systems.NewCL("http://127.0.0.1:7070", db, signed)
 }
 
 func (p *clProc) stop() { p.cmd.Process.Kill(); p.cmd.Wait() }
@@ -128,8 +128,11 @@ func (p *clProc) remove() { os.Remove(p.db) }
 
 // newSystem builds the system under test; for cl it also starts the server process.
 func newSystem(c *common, cs *systems.Conns, bucket string) (systems.System, model.Mode, *clProc) {
-	if c.system == "cl" {
-		p, s := startCL(os.TempDir())
+	if c.system == "cl" || c.system == "cls" {
+		p, s := startCL(os.TempDir(), c.system == "cls")
+		if c.system == "cls" {
+			return s, model.Mode{Name: "cls", Sig: true, Seq: true, Enc: true}, p
+		}
 		return s, model.Mode{Name: "cl", Enc: true}, p
 	}
 	m, err := model.ModeByName(c.system)
@@ -231,6 +234,7 @@ type e1Result struct {
 	Alerts     []systems.Alert   `json:"alerts"`
 	Incomplete [][2]int64        `json:"incomplete_untouched_sample"`
 	XferErrMsg []string          `json:"transfer_error_messages"`
+	Custody    any               `json:"custody_attacks"`
 }
 
 func e1(args []string) {
@@ -242,6 +246,7 @@ func e1(args []string) {
 	postType := fs.Int("post", 10, "post-upload operations per type")
 	adv := fs.String("adversary", "adaptive", "naive|adaptive")
 	xferFrac := fs.Float64("xfer", 0.02, "fraction of clean items with two custody transfers")
+	custN := fs.Int("custody", 10, "custody attacks per kind (forge, rewrite)")
 	fs.Parse(args)
 	adaptive := *adv == "adaptive"
 	cs := conns(c.crypto)
@@ -302,6 +307,7 @@ func e1(args []string) {
 
 	var mu sync.Mutex
 	var alerts []systems.Alert
+	seqOrig := map[int]map[int64]int64{} // gw -> synced sequence number -> ground-truth item (item-level scoring)
 	var link int64
 	var txs int
 	clean := map[int][]*sim.Record{} // gw -> records of clean rounds
@@ -350,6 +356,16 @@ func e1(args []string) {
 				mu.Lock()
 				alerts, link, txs = append(alerts, out.Alerts...), link+out.LinkBytes, txs+out.Txs
 				mu.Unlock()
+				mu.Lock()
+				if seqOrig[gi] == nil {
+					seqOrig[gi] = map[int64]int64{}
+				}
+				for _, x := range recs {
+					if !x.Forged {
+						seqOrig[gi][x.Seq] = x.Orig
+					}
+				}
+				mu.Unlock()
 				for _, x := range recs {
 					if !x.Forged {
 						cp := *x
@@ -390,8 +406,10 @@ func e1(args []string) {
 	var xwg sync.WaitGroup
 	var xmu sync.Mutex
 	sem := make(chan struct{}, 8)
+	var transferred [][2]any
 	for i := 0; i < int(float64(nClean)**xferFrac); i++ {
 		gi, a, _ := pick()
+		transferred = append(transferred, [2]any{gi, a})
 		xwg.Add(1)
 		sem <- struct{}{}
 		go func(gi int, a *sim.Record) {
@@ -428,6 +446,26 @@ func e1(args []string) {
 			ops = append(ops, op)
 		}
 	}
+	// custody attacks (ground truth): forge a transfer of an untransferred item; rewrite an existing transfer
+	type custOp struct {
+		Kind    string `json:"kind"`
+		GW      int    `json:"gw"`
+		Orig    int64  `json:"orig"`
+		Outcome string `json:"outcome"` // prevented | detected | undetected
+	}
+	var custody []*custOp
+	for i := 0; i < *custN; i++ {
+		gi, a, _ := pick()
+		res, err := sys.CustodyAttack("forge", gws[gi], a, adaptive)
+		must(err)
+		custody = append(custody, &custOp{Kind: "forge", GW: gi, Orig: a.Orig, Outcome: res})
+	}
+	for i := 0; i < *custN && i < len(transferred); i++ {
+		gi, a := transferred[i][0].(int), transferred[i][1].(*sim.Record)
+		res, err := sys.CustodyAttack("rewrite", gws[gi], a, adaptive)
+		must(err)
+		custody = append(custody, &custOp{Kind: "rewrite", GW: gi, Orig: a.Orig, Outcome: res})
+	}
 	cpuV0 := snap(minioPID(), clp)
 	vout, err := sys.Verify(gws, truth)
 	must(err)
@@ -442,6 +480,21 @@ func e1(args []string) {
 	// ----- scoring against ground truth
 	all := append(alerts, vout.Alerts...)
 	touched := map[[2]int64]bool{}
+	for _, co := range custody {
+		touched[[2]int64{int64(co.GW), co.Orig}] = true
+		if co.Outcome == "prevented" || co.Outcome == "na" {
+			continue
+		}
+		co.Outcome = "undetected"
+		if vout.CustodyBroken[co.GW][co.Orig] {
+			co.Outcome = "detected"
+		}
+		for _, a := range vout.Alerts {
+			if a.GW == co.GW && a.Orig == co.Orig {
+				co.Outcome = "detected"
+			}
+		}
+	}
 	preRound := map[[2]int]bool{}  // rounds with a pre-upload operation
 	nextRound := map[[2]int]bool{} // the following round (detection window, excluded from false alarms)
 	for _, op := range ops {
@@ -466,7 +519,10 @@ func e1(args []string) {
 			if a.GW != op.GW && op.Pos == "pre" {
 				continue
 			}
-			if op.Pos == "pre" && (a.Round == op.Round || a.Round == op.Round+1) { // same or next sync
+			// pre-upload: same or next sync; not credited: CL chain breaks (only post-upload editing causes them)
+			// and verifier duplicate reports (they name the original copy of a replayed record)
+			preCredit := a.Kind != "chain" && !(a.Kind == "dupseq" && a.Orig >= 0)
+			if op.Pos == "pre" && preCredit && (a.Round == op.Round || a.Round == op.Round+1) {
 				op.Detected = true
 			}
 			if op.Pos == "post" {
@@ -481,6 +537,49 @@ func e1(args []string) {
 				for _, ref := range op.Refs {
 					if o, ok := truth.OrigOf[ref.GW][ref.D]; ok && a.GW == ref.GW && a.Orig == o {
 						op.Detected = true
+					}
+				}
+			}
+		}
+	}
+	// item-level detection (stricter): an alert in the window must name an affected item
+	// (or, for a reordering, report the reorder in that batch)
+	nameOrig := func(a systems.Alert) []int64 {
+		var os []int64
+		if a.Orig >= 0 {
+			os = append(os, a.Orig)
+		}
+		seqs := []int64{}
+		if a.Seq > 0 {
+			seqs = append(seqs, a.Seq)
+		}
+		for s := a.From; s > 0 && s <= a.To; s++ {
+			seqs = append(seqs, s)
+		}
+		for _, s := range seqs {
+			if o, ok := seqOrig[a.GW][s]; ok {
+				os = append(os, o)
+			} else {
+				os = append(os, s) // never synced: signed numbering equals the capture index
+			}
+		}
+		return os
+	}
+	for _, op := range ops {
+		if op.Pos != "pre" || op.NA {
+			continue
+		}
+		for _, a := range all {
+			if a.GW != op.GW || !(a.Round == op.Round || a.Round == op.Round+1) || a.Kind == "chain" || (a.Kind == "dupseq" && a.Orig >= 0) {
+				continue
+			}
+			if op.Type == "reorder" && a.Kind == "reorder" && a.Round == op.Round {
+				op.DetectedItem = true
+			}
+			for _, o := range nameOrig(a) {
+				for _, t := range op.Targets {
+					if o == t {
+						op.DetectedItem = true
 					}
 				}
 			}
@@ -540,7 +639,7 @@ func e1(args []string) {
 			"minio": cpuSync.minio - cpu0.minio, "cl_server": cpuSync.clsrv - cpu0.clsrv},
 		CPUVerify: map[string]float64{"fabric": cpuV1.fabric - cpuV0.fabric, "client": cpuV1.client - cpuV0.client,
 			"minio": cpuV1.minio - cpuV0.minio},
-		SyncWall: syncWall, WallSec: wall, Alerts: all, Incomplete: incomplete, XferErrMsg: xmsgs}
+		SyncWall: syncWall, WallSec: wall, Alerts: all, Incomplete: incomplete, XferErrMsg: xmsgs, Custody: custody}
 	if clp != nil {
 		if fi, err := os.Stat(clp.db); err == nil {
 			res.Storage["cl_db"] = fi.Size()
@@ -773,6 +872,122 @@ func e3(args []string) {
 		"rows": rows})
 }
 
+// ---------------------------------------------------------------- benign link loss
+
+// eloss: no tampering. A synchronization's anchoring transaction is lost with probability -loss
+// (entries stay queued and are re-sent with the next synchronization), and a committed
+// synchronization loses its acknowledgement with probability -lostack (entries are re-sent anyway).
+func eloss(args []string) {
+	fs := flag.NewFlagSet("eloss", flag.ExitOnError)
+	var c common
+	c.flags(fs)
+	rounds := fs.Int("rounds", 40, "")
+	pLoss := fs.Float64("loss", 0.2, "")
+	pAck := fs.Float64("lostack", 0.1, "")
+	fs.Parse(args)
+	cs := conns(c.crypto)
+	bucket := bucketName(fmt.Sprintf("eloss-%s-%d", c.system, c.seed))
+	sys, mode, clp := newSystem(&c, cs, bucket)
+	if clp != nil {
+		defer clp.stop()
+	}
+	truth := systems.NewTruth()
+	wr := rand.New(rand.NewSource(c.seed))
+	lr := rand.New(rand.NewSource(c.seed*977 + 3))
+	gws := make([]*sim.Gateway, c.gws)
+	sizes := make([][]int, c.gws)
+	maxItems := 0
+	for i := range gws {
+		gws[i] = sim.New(i, mode, c.seed, salt(bucket))
+		must(sys.Register(gws[i]))
+		tot := 0
+		for r := 0; r < *rounds; r++ {
+			sizes[i] = append(sizes[i], 20+wr.Intn(41))
+			tot += sizes[i][r]
+		}
+		if tot > maxItems {
+			maxItems = tot
+		}
+	}
+	plan := make([][]int, c.gws) // 0 ok, 1 lost transaction, 2 lost acknowledgement
+	for i := range plan {
+		for r := 0; r < *rounds; r++ {
+			x, v := lr.Float64(), 0
+			if x < *pLoss {
+				v = 1
+			} else if x < *pLoss+*pAck {
+				v = 2
+			}
+			if r == *rounds-1 {
+				v = 0 // final synchronization succeeds
+			}
+			plan[i] = append(plan[i], v)
+		}
+	}
+	t0 := time.Now().Add(-time.Duration(maxItems+120) * time.Second).UnixNano()
+	var mu sync.Mutex
+	kinds := map[string]int{}
+	lost, acks := 0, 0
+	var wg sync.WaitGroup
+	for gi := range gws {
+		wg.Add(1)
+		go func(gi int) {
+			defer wg.Done()
+			g := gws[gi]
+			var queue []*sim.Record
+			vt := t0
+			for r := 0; r < *rounds; r++ {
+				for j := 0; j < sizes[gi][r]; j++ {
+					vt += int64(time.Second)
+					rec := g.Capture(vt)
+					truth.Add(rec, r)
+					queue = append(queue, rec)
+				}
+				switch plan[gi][r] {
+				case 1:
+					mu.Lock()
+					lost++
+					mu.Unlock()
+					continue // nothing reached the ledger; keep the queue
+				}
+				out, err := sys.Sync(g, queue, r, c.b)
+				must(err)
+				mu.Lock()
+				for _, a := range out.Alerts {
+					kinds[a.Kind]++
+				}
+				if plan[gi][r] == 2 {
+					acks++
+				}
+				mu.Unlock()
+				if plan[gi][r] != 2 {
+					queue = nil
+				}
+			}
+		}(gi)
+	}
+	wg.Wait()
+	vout, err := sys.Verify(gws, truth)
+	must(err)
+	for _, a := range vout.Alerts {
+		kinds["verify:"+a.Kind]++
+	}
+	items, complete := 0, 0
+	for gi := range gws {
+		for o := range truth.RoundOf[gi] {
+			items++
+			if vout.Complete[gi][o] {
+				complete++
+			}
+		}
+	}
+	writeJSON(c.out, fmt.Sprintf("eloss_%s_seed%d.json", c.system, c.seed), map[string]any{"exp": "eloss", "system": c.system,
+		"seed": c.seed, "env": env(), "config": map[string]any{"gws": c.gws, "rounds": *rounds, "p_lost_tx": *pLoss,
+			"p_lost_ack": *pAck, "b": c.b, "batch_timeout": c.batchTimeout},
+		"items": items, "complete": complete, "lost_syncs": lost, "lost_acks": acks, "alert_kinds": kinds})
+	fmt.Printf("eloss items=%d complete=%d lost=%d acks=%d kinds=%v\n", items, complete, lost, acks, kinds)
+}
+
 // ---------------------------------------------------------------- clock bound (V4)
 
 func eclock(args []string) {
@@ -857,6 +1072,8 @@ func main() {
 		e3(os.Args[2:])
 	case "eclock":
 		eclock(os.Args[2:])
+	case "eloss":
+		eloss(os.Args[2:])
 	default:
 		fmt.Println("unknown command")
 		os.Exit(2)

@@ -23,6 +23,7 @@ type Op struct {
 	Key      string  `json:"key,omitempty"` // object inserted after upload (orphan)
 	Refs     []Ref   `json:"refs,omitempty"` // cross-gateway targets by digest (CL truncate)
 	Detected bool    `json:"detected"`
+	DetectedItem bool `json:"detected_item"` // stricter: an alert names an affected item
 	NA       bool    `json:"na,omitempty"` // operation not applicable to this system at this position
 }
 
@@ -47,8 +48,15 @@ func (rp Repairer) Repair(recs []*sim.Record) {
 	if rp.Signed {
 		return
 	}
+	// timestamps are unkeyed too: reassign them in increasing order of position
+	ts := make([]int64, len(recs))
+	for i, r := range recs {
+		ts[i] = r.T
+	}
+	sort.Slice(ts, func(a, b int) bool { return ts[a] < ts[b] })
 	prev := rp.AnchorHash
 	for i, r := range recs {
+		r.T = ts[i]
 		if rp.Seq {
 			r.Seq = rp.AnchorSeq + int64(i) + 1
 		}

@@ -28,12 +28,13 @@ type Row struct {
 	Round int    `json:"r"`
 	From  string `json:"from,omitempty"`
 	To    string `json:"to,omitempty"`
+	Sig   string `json:"sig,omitempty"` // gateway signature (signed CL only)
 	Prev  string `json:"prev"`
 	H     string `json:"h"`
 }
 
 func rowHash(r Row) string {
-	return model.H([]byte(fmt.Sprintf("CL1|%s|%s|%d|%d|%d|%s|%s|%s|%s", r.Prev, r.Kind, r.GW, r.Seq, r.T, r.D, r.P, r.From, r.To)))
+	return model.H([]byte(fmt.Sprintf("CL1|%s|%s|%d|%d|%d|%s|%s|%s|%s|%s", r.Prev, r.Kind, r.GW, r.Seq, r.T, r.D, r.P, r.From, r.To, r.Sig)))
 }
 
 // ---------------------------------------------------------------- server (separate process)
@@ -56,6 +57,7 @@ type ingRec struct {
 	Seq int64  `json:"seq"`
 	T   int64  `json:"t"`
 	P   string `json:"p"`
+	Sig string `json:"sig,omitempty"`
 }
 type xferReq struct {
 	Seq  int64  `json:"seq"`
@@ -95,7 +97,7 @@ func (s *clServer) handle(w http.ResponseWriter, req *http.Request) {
 			s.next[in.GW] = r.Seq
 		}
 		p, _ := base64.StdEncoding.DecodeString(r.P)
-		s.append(Row{Kind: "item", GW: in.GW, Seq: r.Seq, T: r.T, D: model.H(p), P: r.P, Round: in.Round})
+		s.append(Row{Kind: "item", GW: in.GW, Seq: r.Seq, T: r.T, D: model.H(p), P: r.P, Round: in.Round, Sig: r.Sig})
 	}
 	s.w.Flush()
 	s.f.Sync()
@@ -118,21 +120,28 @@ func ServeCL(addr, dbPath string) error {
 // CL is the centralized-log baseline as seen by gateways, the verifier and the insider.
 type CL struct {
 	URL, DB string
+	Signed  bool // CL-S: gateway signs each record; the verifier checks signatures
 	hc      *http.Client
 	mu      sync.Mutex
 	anch    map[int]int64
+	gws     map[int]*sim.Gateway // public keys known to the verifier
 }
 
-func NewCL(url, db string) *CL {
-	return &CL{URL: url, DB: db, hc: &http.Client{Timeout: 5 * time.Minute}, anch: map[int]int64{}}
+func NewCL(url, db string, signed bool) *CL {
+	return &CL{URL: url, DB: db, Signed: signed, hc: &http.Client{Timeout: 5 * time.Minute}, anch: map[int]int64{}, gws: map[int]*sim.Gateway{}}
 }
 
-func (c *CL) Name() string                    { return "cl" }
-func (c *CL) Register(g *sim.Gateway) error   { return nil }
+func (c *CL) Name() string {
+	if c.Signed {
+		return "cls"
+	}
+	return "cl"
+}
+func (c *CL) Register(g *sim.Gateway) error { c.mu.Lock(); c.gws[g.Idx] = g; c.mu.Unlock(); return nil }
 func (c *CL) Repairer(g *sim.Gateway) tamper.Repairer {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return tamper.Repairer{Signed: false, Seq: true, AnchorSeq: c.anch[g.Idx]}
+	return tamper.Repairer{Signed: c.Signed, Seq: true, AnchorSeq: c.anch[g.Idx]}
 }
 
 func (c *CL) post(req ingestReq) ([]string, int64, time.Duration, error) {
@@ -156,7 +165,7 @@ func (c *CL) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (SyncOut
 	for _, ch := range chunks(recs, b) {
 		req := ingestReq{GW: g.Idx, Round: round}
 		for _, r := range ch {
-			req.Recs = append(req.Recs, ingRec{Seq: r.Seq, T: r.T, P: base64.StdEncoding.EncodeToString(r.Cipher)})
+			req.Recs = append(req.Recs, ingRec{Seq: r.Seq, T: r.T, P: base64.StdEncoding.EncodeToString(r.Cipher), Sig: r.Sig})
 		}
 		alerts, _, lat, err := c.post(req)
 		if err != nil {
@@ -166,7 +175,7 @@ func (c *CL) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (SyncOut
 		meta := req
 		meta.Recs = nil
 		for _, r := range ch {
-			meta.Recs = append(meta.Recs, ingRec{Seq: r.Seq, T: r.T})
+			meta.Recs = append(meta.Recs, ingRec{Seq: r.Seq, T: r.T, Sig: r.Sig})
 			out.LinkBytes += int64(len(r.Cipher))
 		}
 		mb, _ := json.Marshal(meta)
@@ -259,6 +268,9 @@ func (c *CL) Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, adap
 	}
 	op.Targets = []int64{target.Orig}
 	shift := func(from int, delta int64) { // adaptive insider renumbers later rows of the same gateway
+		if c.Signed { // pointless for signed records: renumbering would break their signatures
+			return
+		}
 		for i := from; i < len(rows); i++ {
 			if rows[i].Kind == "item" && rows[i].GW == g.Idx {
 				rows[i].Seq += delta
@@ -312,12 +324,12 @@ func (c *CL) Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, adap
 			return nil
 		}
 		rows[idx], rows[j] = rows[j], rows[idx]
-		if adaptive {
+		if adaptive && !c.Signed {
 			rows[idx].Seq, rows[j].Seq = rows[j].Seq, rows[idx].Seq
 		}
 	case "replay":
 		r := rows[idx]
-		if adaptive {
+		if adaptive && !c.Signed {
 			r.Seq = maxSeq() + 1
 		}
 		rows = append(rows, r)
@@ -329,13 +341,14 @@ func (c *CL) Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, adap
 }
 
 func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
-	out := VerifyOut{Complete: map[int]map[int64]bool{}}
+	out := VerifyOut{Complete: map[int]map[int64]bool{}, CustodyBroken: map[int]map[int64]bool{}}
 	rows, err := c.load()
 	if err != nil {
 		return out, err
 	}
 	// Per-row verification: row i is valid if its own hash matches and it links to row i-1.
 	bad := make([]bool, len(rows))
+	brokenXfer := map[[2]int64]bool{}
 	for i, r := range rows {
 		d := r.D
 		if r.Kind == "item" {
@@ -349,8 +362,25 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 		if r.Prev != prev || rowHash(r) != r.H || d != r.D {
 			bad[i] = true
 			if r.Kind == "item" {
-				o, rd := t.orig(r.GW, r.D)
+				o, rd := t.orig(r.GW, d)
+				if rd < 0 {
+					rd = r.Round
+				}
 				out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: rd, Orig: o, Kind: "chain"})
+			} else {
+				brokenXfer[[2]int64{int64(r.GW), r.Seq}] = true
+			}
+		}
+		if c.Signed && r.Kind == "item" { // CL-S: check the gateway signature over (p_g, seq, t, d)
+			g := c.gws[r.GW]
+			e := model.Entry{Seq: r.Seq, T: r.T, D: d}
+			if g == nil || !model.Verify(g.Pub, []byte(model.EntryHash(g.Pg, e)), r.Sig) {
+				bad[i] = true
+				o, rd := t.orig(r.GW, d)
+				if rd < 0 {
+					rd = r.Round
+				}
+				out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: rd, Orig: o, Kind: "sig"})
 			}
 		}
 	}
@@ -365,7 +395,8 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 			if cust[k] == "" {
 				cust[k] = collector
 			}
-			if cust[k] != r.From {
+			allowed := r.To == collector || r.To == investigator || r.To == investigator2 // role policy, known offline
+			if cust[k] != r.From || !allowed || brokenXfer[k] {
 				cust[k] = "broken"
 			} else {
 				cust[k] = r.To
@@ -396,11 +427,52 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 		}
 		if out.Complete[r.GW] == nil {
 			out.Complete[r.GW] = map[int64]bool{}
+			out.CustodyBroken[r.GW] = map[int64]bool{}
 		}
 		if cs := cust[[2]int64{int64(r.GW), r.Seq}]; cs != "broken" {
 			out.Complete[r.GW][o] = true
+		} else {
+			out.CustodyBroken[r.GW][o] = true
 		}
 	}
 	sortAlerts(out.Alerts)
 	return out, nil
+}
+
+// CustodyAttack applies a custody attack. "forge": anyone posts a transfer of an item that names the
+// current custodian as sender (the server does not authenticate submitters). "rewrite": an insider
+// edits the recipient of an existing transfer; an adaptive insider also fixes the next row and the chain.
+func (c *CL) CustodyAttack(kind string, g *sim.Gateway, r *sim.Record, adaptive bool) (string, error) {
+	switch kind {
+	case "forge":
+		_, _, _, err := c.post(ingestReq{GW: g.Idx, Xfer: &xferReq{Seq: r.Seq, From: collector, To: investigator2}})
+		if err != nil {
+			return "", err
+		}
+		return "accepted", nil
+	case "rewrite":
+		rows, err := c.load()
+		if err != nil {
+			return "", err
+		}
+		first := -1
+		for i, x := range rows {
+			if x.Kind == "xfer" && x.GW == g.Idx && x.Seq == r.Seq {
+				if first < 0 {
+					first = i
+					rows[i].To = investigator2 // custody now appears to pass to another investigator
+				} else if adaptive {
+					rows[i].From = investigator2 // keep the history consistent
+				}
+			}
+		}
+		if first < 0 {
+			return "na", nil
+		}
+		if adaptive {
+			rechain(rows, 0)
+		}
+		return "accepted", c.save(rows)
+	}
+	return "", fmt.Errorf("unknown custody attack %s", kind)
 }

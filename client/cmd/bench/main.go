@@ -131,7 +131,7 @@ func newSystem(c *common, cs *systems.Conns, bucket string) (systems.System, mod
 	if c.system == "cl" || c.system == "cls" {
 		p, s := startCL(os.TempDir(), c.system == "cls")
 		if c.system == "cls" {
-			return s, model.Mode{Name: "cls", Sig: true, Seq: true, Enc: true}, p
+			return s, model.Mode{Name: "cls", Sig: true, Seq: true, Enc: true, Prot: true}, p // generous baseline: protected counter
 		}
 		return s, model.Mode{Name: "cl", Enc: true}, p
 	}

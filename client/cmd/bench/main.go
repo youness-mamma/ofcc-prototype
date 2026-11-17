@@ -326,6 +326,9 @@ func e1(args []string) {
 					orng := rand.New(rand.NewSource(c.seed*1009 + int64(gi)*97 + int64(r)))
 					recs = tamper.ApplyPre(op, recs, hist, adaptive, sys.Repairer(g), orng)
 					compromised = adaptive
+					if !mode.Prot && mode.Sig && mode.Seq && len(recs) > 0 { // OFCC-noProt: state lives in the store
+						g.ReloadFromStore(recs[len(recs)-1])
+					}
 				} else {
 					if compromised {
 						if rp := sys.Repairer(g); !rp.Signed {

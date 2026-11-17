@@ -44,7 +44,8 @@ type Gateway struct {
 	key   []byte
 	aead  cipher.AEAD
 	rng   *rand.Rand
-	count int64 // ground-truth capture counter
+	count int64 // ground-truth capture counter (Orig); never visible to the adversary
+	seq   int64 // sequence counter used in entries (equal to count unless the store state was rolled back)
 	// protected state (A2): last sequence number and last chain hash; the tamper tool cannot write these.
 	K  int64
 	Hk string
@@ -109,12 +110,13 @@ func (g *Gateway) Capture(t int64) *Record {
 		c = g.Encrypt(p)
 	}
 	r := &Record{GW: g.Idx, Orig: g.count, T: t, Cipher: c, D: model.H(c), Kind: kind}
+	g.seq++
 	if g.Mode.Name == "ha" || g.Mode.Name == "cl" {
-		r.Seq = g.count // unsigned local counter
+		r.Seq = g.seq // unsigned local counter
 		return r
 	}
 	if g.Mode.Seq {
-		r.Seq = g.count
+		r.Seq = g.seq
 	}
 	if g.Mode.Chain {
 		r.Prev = g.Hk
@@ -124,8 +126,17 @@ func (g *Gateway) Capture(t int64) *Record {
 	if g.Mode.Sig {
 		r.Sig = model.Sign(g.Priv, []byte(h))
 	}
-	g.K, g.Hk = g.count, h
+	g.K, g.Hk = g.seq, h
 	return r
+}
+
+// ReloadFromStore models a gateway without a protected counter (OFCC-noProt): its next sequence
+// number and chain head are read back from the (possibly tampered) local store.
+func (g *Gateway) ReloadFromStore(last *Record) {
+	if last == nil {
+		return
+	}
+	g.seq, g.K, g.Hk = last.Seq, last.Seq, model.EntryHash(g.Pg, last.Entry())
 }
 
 // Header returns the signed header eta from the protected state (nil when the mode has no header).

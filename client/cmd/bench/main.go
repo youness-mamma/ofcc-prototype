@@ -448,7 +448,18 @@ func e1(args []string) {
 	for _, op := range pre {
 		ops = append(ops, op)
 	}
-	for _, t := range tamper.Ops {
+	// truncation first: it drops rows at the end of a log, so applying it later could erase the
+	// evidence of another operation and confound both
+	postOrder := append([]string{"truncate"}, func() []string {
+		var r []string
+		for _, x := range tamper.Ops {
+			if x != "truncate" {
+				r = append(r, x)
+			}
+		}
+		return r
+	}()...)
+	for _, t := range postOrder {
 		for i := 0; i < *postType; i++ {
 			gi, a, b := pick()
 			op := &tamper.Op{Type: t, Pos: "post", GW: gi, Round: truth.RoundOf[gi][a.Orig]}

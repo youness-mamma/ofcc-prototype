@@ -307,9 +307,12 @@ func e1(args []string) {
 							rp.Repair(recs)
 						}
 					}
-					mu.Lock()
-					clean[gi] = append(clean[gi], recs...)
-					mu.Unlock()
+					// items outside every detection window are the pool for transfers and post-upload targets
+					if _, prevTampered := pre[[2]int{gi, r - 1}]; !prevTampered {
+						mu.Lock()
+						clean[gi] = append(clean[gi], recs...)
+						mu.Unlock()
+					}
 				}
 				out, err := sys.Sync(g, recs, r, c.b)
 				if err != nil {

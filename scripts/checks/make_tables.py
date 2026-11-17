@@ -102,15 +102,15 @@ def cell(entry):
     m, sd = entry["mean"], entry["std"]
     return pct(m) if sd < 1e-9 else f"{100*m:.0f}$\\pm${100*sd:.0f}"
 
-lines = [r"\begin{tabular}{@{}llrrrrrrrrrrrr@{}}", r"\toprule",
-         r" & & \multicolumn{7}{c}{Before upload} & After & \multicolumn{2}{c}{Custody} & FA & Compl. \\ \cmidrule(lr){3-9}\cmidrule(lr){11-12}",
-         "System & Adv. & " + " & ".join(OPHDR) + r" & upload & Forge & Rewr. & (\%) & (\%) \\", r"\midrule"]
+lines = [r"\begin{tabular}{@{}llrrrrrrrrrrrrr@{}}", r"\toprule",
+         r" & & \multicolumn{8}{c}{Before upload} & After & \multicolumn{2}{c}{Custody} & FA & Compl. \\ \cmidrule(lr){3-10}\cmidrule(lr){12-13}",
+         "System & Adv. & " + " & ".join(OPHDR) + r" & Item & upload & Forge & Rewr. & (\%) & (\%) \\", r"\midrule"]
 for s, a, lab in ROWS:
     if (s, a) not in e1:
         continue
     k = f"e1.{s}.{a}"
     row = [lab, "A" if a == "adaptive" else "N"] + [cell(N[f"{k}.det.pre.{op}"]) for op in OPS]
-    row += [cell(N[f"{k}.det.post.all"]), ccell(N.get(f"{k}.custody.forge")), ccell(N.get(f"{k}.custody.rewrite")),
+    row += [cell(N[f"{k}.det_item.pre.all"]), cell(N[f"{k}.det.post.all"]), ccell(N.get(f"{k}.custody.forge")), ccell(N.get(f"{k}.custody.rewrite")),
             f"{100*N[k+'.fa_rate']['mean']:.1f}", f"{100*N[k+'.completeness']['mean']:.1f}"]
     lines.append(" & ".join(row) + r" \\")
     if s in ("noEnc", "cl") and a == "adaptive" and s == "noEnc":
@@ -172,6 +172,14 @@ for L in (800, 1600):
         b = N.get(f"e3.scale.ofcc.orgs5.L{L}.{m}", {}).get("per_seed", {})
         if a and b:
             N[f"paired.e3.orgs3_minus_orgs5.L{L}.{m}"] = paired(a, b)
+
+# systems at saturation: OFCC minus HA (same runner job per seed)
+for L in (800, 1600):
+    for m in ("throughput_items_per_s", "item_latency_p95_s"):
+        a = N.get(f"e3.sys.ofcc.orgs4.L{L}.{m}", {}).get("per_seed", {})
+        b = N.get(f"e3.sys.ha.orgs4.L{L}.{m}", {}).get("per_seed", {})
+        if a and b:
+            N[f"paired.e3.ofcc_minus_ha.L{L}.{m}"] = paired(a, b)
 
 # benign link loss
 for f in glob.glob(os.path.join(raw, "**", "eloss_*.json"), recursive=True):

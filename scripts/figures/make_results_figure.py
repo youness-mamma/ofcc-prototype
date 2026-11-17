@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fig. 2: (a) sync time vs outage length; (b) item p95 latency vs offered load (OFCC, HA, CL; 4 orgs);
+"""Fig. 2: (a) sync time vs outage length; (b) item p95 latency vs offered load (OFCC, HA, CL, CL-S; 4 orgs);
 (c) OFCC item p95 latency vs load for 3, 4, 5 organizations. Markers: mean over seeds; bars: min-max.
 Usage: make_results_figure.py <raw_dir> <out_stem>  -> <out_stem>.pdf (vector) and .png (1200 dpi)
 """
@@ -16,6 +16,7 @@ matplotlib.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "font.size": 
 STY = {"ofcc": dict(color="#1b3a5c", marker="o", ls="-", label="OFCC"),
        "ha": dict(color="#7a4a1e", marker="s", ls="--", label="HA"),
        "cl": dict(color="#4d4d4d", marker="^", ls=":", label="CL"),
+       "cls": dict(color="#8c8c8c", marker="x", ls="-.", label="CL-S", mfc="none"),
        3: dict(color="#1b3a5c", marker="v", ls="--", label="3 orgs"),
        4: dict(color="#1b3a5c", marker="o", ls="-", label="4 orgs"),
        5: dict(color="#1b3a5c", marker="D", ls=":", label="5 orgs")}
@@ -42,11 +43,11 @@ def plot(ax, series, key):
     ax.errorbar(xs, m, yerr=[lo, hi], capsize=1.5, ms=3, elinewidth=0.6, **STY[key])
 
 fig, ax = plt.subplots(1, 3, figsize=(4.8, 1.9), constrained_layout=True)
-for s in ("ofcc", "ha", "cl"):
+for s in ("ofcc", "ha", "cl", "cls"):
     plot(ax[0], e2[s], s)
 ax[0].set_xlabel("Outage length (min)"); ax[0].set_ylabel("Sync time (s)"); ax[0].set_title("(a) Synchronization")
 ax[0].xaxis.set_major_locator(FixedLocator([1, 5, 10, 20]))
-for s in ("ofcc", "ha", "cl"):
+for s in ("ofcc", "ha", "cl", "cls"):
     plot(ax[1], sysl[s], s)
 for n in (3, 4, 5):
     plot(ax[2], scal[n], n)

@@ -43,7 +43,7 @@ def matches(tok):
     return False
 
 bad, ok_res, ok_cfg = [], 0, 0
-for m in re.finditer(r"(?<![A-Za-z0-9.\\])[-+]?\d[\d,]*(\.\d+)?", body):
+for m in re.finditer(r"(?<![A-Za-z0-9.\\])(?:(?<=-)|[-+]?)\d[\d,]*(\.\d+)?", body.replace("--", "\u2013")):  # en dash in ranges is not a sign
     tok = m.group(0)
     if tok.strip("+-") in cfg or tok in cfg:
         ok_cfg += 1

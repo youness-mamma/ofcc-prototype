@@ -323,6 +323,7 @@ func (c *CL) Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, adap
 			op.NA = true
 			return nil
 		}
+		op.Refs = append(op.Refs, tamper.Ref{GW: g.Idx, D: rows[j].D}) // both swapped items are targets
 		rows[idx], rows[j] = rows[j], rows[idx]
 		if adaptive && !c.Signed {
 			rows[idx].Seq, rows[j].Seq = rows[j].Seq, rows[idx].Seq
@@ -362,7 +363,10 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 		if r.Prev != prev || rowHash(r) != r.H || d != r.D {
 			bad[i] = true
 			if r.Kind == "item" {
-				o, rd := t.orig(r.GW, d)
+				o, rd := t.orig(r.GW, r.D) // digest recorded at ingest
+				if o < 0 {
+					o, rd = t.orig(r.GW, d)
+				}
 				if rd < 0 {
 					rd = r.Round
 				}
@@ -376,7 +380,10 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 			e := model.Entry{Seq: r.Seq, T: r.T, D: d}
 			if g == nil || !model.Verify(g.Pub, []byte(model.EntryHash(g.Pg, e)), r.Sig) {
 				bad[i] = true
-				o, rd := t.orig(r.GW, d)
+				o, rd := t.orig(r.GW, r.D) // digest recorded at ingest
+				if o < 0 {
+					o, rd = t.orig(r.GW, d)
+				}
 				if rd < 0 {
 					rd = r.Round
 				}

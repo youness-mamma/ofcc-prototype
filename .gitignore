@@ -7,3 +7,4 @@ bin/
 fabric/
 minio-bin/
 minio-data/
+.venv/

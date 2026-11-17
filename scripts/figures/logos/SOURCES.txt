@@ -1,0 +1,7 @@
+Official logos, fetched 2026-11-16, used unmodified (only scaled) in figure01:
+fabric.svg  Hyperledger Fabric  https://www.lfdecentralizedtrust.org/hubfs/LF%20Decentralized%20Trust/fabric_stroke.svg  (LF Decentralized Trust, Fabric project page)
+minio.svg   MinIO               https://raw.githubusercontent.com/minio/minio/master/.github/logo.svg  (official MinIO repository)
+raft.svg    Raft consensus      https://raft.github.io/logo/solo.svg  (official Raft site)
+fabric_lfdt_page.svg  original download of the Fabric illustration from the official LF Decentralized Trust Fabric page (contains the current Fabric mark)
+fabric_mark.svg       same file with only the outer viewBox cropped to the mark ("-32 205 575 470"); artwork unchanged
+fabric_official.png   logo used in the official Fabric docs/repo (older design, raster) - kept for reference, not used

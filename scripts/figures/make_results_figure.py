@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fig. 2: (a) sync time vs outage length; (b) item p95 latency vs offered load (OFCC, HA, CL, CL-S; 4 orgs);
+"""Fig. 3 (figure03): (a) sync time vs outage length; (b) item p95 latency vs offered load (OFCC, HA, CL, CL-S; 4 orgs);
 (c) OFCC item p95 latency vs load for 3, 4, 5 organizations. Markers: mean over seeds; bars: min-max.
 Usage: make_results_figure.py <raw_dir> <out_stem>  -> <out_stem>.pdf (vector) and .png (1200 dpi)
 """

@@ -13,9 +13,9 @@ from scoring import rescore
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447}
 OPS = ["modEntry", "modPayload", "delete", "truncate", "insert", "reorder", "replay"]
 OPHDR = ["ME", "MP", "Del", "Tr", "Ins", "Ro", "Rp"]
-ROWS = [("ofcc", "adaptive", "OFCC"), ("ofcc", "naive", "OFCC"), ("noChain", "adaptive", "noChain"),
+ROWS = [("ofcc", "adaptive", "OFCC"), ("noChain", "adaptive", "noChain"),
         ("noSig", "adaptive", "noSig"), ("noSeq", "adaptive", "noSeq"), ("noProt", "adaptive", "noProt"),
-        ("noEnc", "adaptive", "noEnc"), ("ha", "adaptive", "HA"), ("ha", "naive", "HA"),
+        ("ha", "adaptive", "HA"), ("ha", "naive", "HA"),
         ("cls", "adaptive", "CL-S"), ("cls", "naive", "CL-S"), ("cl", "adaptive", "CL"), ("cl", "naive", "CL")]
 raw, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
@@ -113,14 +113,14 @@ for s, a, lab in ROWS:
     row += [cell(N[f"{k}.det_item.pre.all"]), cell(N[f"{k}.det.post.all"]), ccell(N.get(f"{k}.custody.forge")), ccell(N.get(f"{k}.custody.rewrite")),
             f"{100*N[k+'.fa_rate']['mean']:.1f}"]
     lines.append(" & ".join(row) + r" \\")
-    if s in ("noEnc", "cl") and a == "adaptive" and s == "noEnc":
+    if s == "noProt":
         lines.append(r"\midrule")
 lines += [r"\bottomrule", r"\end{tabular}"]
 open(os.path.join(out, "table_detection.tex"), "w").write("\n".join(lines) + "\n")
 
 cost = [r"\begin{tabular}{@{}lrrrr@{}}", r"\toprule",
         r"System & Link (MB) & Ledger (MB) & Off-chain or DB (MB) & CPU (s) \\", r"\midrule"]
-for s, lab in (("ofcc", "OFCC"), ("noEnc", "noEnc"), ("ha", "HA"), ("cls", "CL-S"), ("cl", "CL")):
+for s, lab in (("ofcc", "OFCC"), ("ha", "HA"), ("cls", "CL-S"), ("cl", "CL")):
     k = f"e1.{s}.adaptive"
     if k + ".link_mb_per_1k" not in N:
         continue

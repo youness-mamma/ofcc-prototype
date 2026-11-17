@@ -16,7 +16,7 @@ OPHDR = ["ME", "MP", "Del", "Tr", "Ins", "Ro", "Rp"]
 ROWS = [("ofcc", "adaptive", "OFCC"), ("ofcc", "naive", "OFCC"), ("noChain", "adaptive", "noChain"),
         ("noSig", "adaptive", "noSig"), ("noSeq", "adaptive", "noSeq"), ("noProt", "adaptive", "noProt"),
         ("noEnc", "adaptive", "noEnc"), ("ha", "adaptive", "HA"), ("ha", "naive", "HA"),
-        ("cl", "adaptive", "CL"), ("cl", "naive", "CL")]
+        ("cls", "adaptive", "CL-S"), ("cls", "naive", "CL-S"), ("cl", "adaptive", "CL"), ("cl", "naive", "CL")]
 raw, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
 N = {}
@@ -64,6 +64,16 @@ for (s, a), seeds in e1.items():
         m, sd = ms(v)
         N[f"{key}.det.{pos}.all"] = None if m is None else {"mean": m, "std": sd}
         N[f"{key}.ops.{pos}.applied_total"] = sum(sum(1 for o in d["ops"] if o["pos"] == pos and not o.get("na")) for d in seeds.values())
+    v = []
+    for d in seeds.values():
+        ops = [o for o in d["ops"] if o["pos"] == "pre" and not o.get("na")]
+        v.append(sum(o.get("detected_item", False) for o in ops) / len(ops) if ops else None)
+    m, sd = ms(v)
+    N[f"{key}.det_item.pre.all"] = None if m is None else {"mean": m, "std": sd}
+    for kind in ("forge", "rewrite"):
+        outs = [c["outcome"] for d in seeds.values() for c in (d.get("custody_attacks") or []) if c["kind"] == kind]
+        N[f"{key}.custody.{kind}"] = {"n": len(outs), "prevented": outs.count("prevented"),
+                                      "detected": outs.count("detected"), "undetected": outs.count("undetected")}
     for name, fn in (("fa_rate", lambda d: d["false_alarm_items"] / d["untouched_items"]),
                      ("completeness", lambda d: d["complete_untouched_items"] / d["untouched_items"]),
                      ("link_mb_per_1k", lambda d: d["link_bytes"] / 2**20 / (d["items"] / 1000)),
@@ -79,21 +89,28 @@ for (s, a), seeds in e1.items():
 def pct(x):
     return "--" if x is None else f"{100 * x:.0f}"
 
+def ccell(e):
+    if not e or not e["n"]:
+        return "--"
+    if e["prevented"] == e["n"]:
+        return "P"
+    return f"{100 * e['detected'] / e['n']:.0f}"
+
 def cell(entry):
     if entry is None:
         return "--"
     m, sd = entry["mean"], entry["std"]
     return pct(m) if sd < 1e-9 else f"{100*m:.0f}$\\pm${100*sd:.0f}"
 
-lines = [r"\begin{tabular}{@{}llrrrrrrrrrr@{}}", r"\toprule",
-         r" & & \multicolumn{7}{c}{Before upload} & After & FA & Compl. \\ \cmidrule(lr){3-9}",
-         "System & Adv. & " + " & ".join(OPHDR) + r" & upload & (\%) & (\%) \\", r"\midrule"]
+lines = [r"\begin{tabular}{@{}llrrrrrrrrrrrr@{}}", r"\toprule",
+         r" & & \multicolumn{7}{c}{Before upload} & After & \multicolumn{2}{c}{Custody} & FA & Compl. \\ \cmidrule(lr){3-9}\cmidrule(lr){11-12}",
+         "System & Adv. & " + " & ".join(OPHDR) + r" & upload & Forge & Rewr. & (\%) & (\%) \\", r"\midrule"]
 for s, a, lab in ROWS:
     if (s, a) not in e1:
         continue
     k = f"e1.{s}.{a}"
     row = [lab, "A" if a == "adaptive" else "N"] + [cell(N[f"{k}.det.pre.{op}"]) for op in OPS]
-    row += [cell(N[f"{k}.det.post.all"]),
+    row += [cell(N[f"{k}.det.post.all"]), ccell(N.get(f"{k}.custody.forge")), ccell(N.get(f"{k}.custody.rewrite")),
             f"{100*N[k+'.fa_rate']['mean']:.1f}", f"{100*N[k+'.completeness']['mean']:.1f}"]
     lines.append(" & ".join(row) + r" \\")
     if s in ("noEnc", "cl") and a == "adaptive" and s == "noEnc":
@@ -103,12 +120,12 @@ open(os.path.join(out, "table_detection.tex"), "w").write("\n".join(lines) + "\n
 
 cost = [r"\begin{tabular}{@{}lrrrr@{}}", r"\toprule",
         r"System & Link (MB) & Ledger (MB) & Off-chain or DB (MB) & CPU (s) \\", r"\midrule"]
-for s, lab in (("ofcc", "OFCC"), ("noEnc", "OFCC-noEnc"), ("ha", "HA"), ("cl", "CL")):
+for s, lab in (("ofcc", "OFCC"), ("noEnc", "OFCC-noEnc"), ("ha", "HA"), ("cls", "CL-S"), ("cl", "CL")):
     k = f"e1.{s}.adaptive"
     if k + ".link_mb_per_1k" not in N:
         continue
     f2 = lambda e: f"{e['mean']:.1f}$\\pm${e['std']:.1f}"
-    store = N[k + (".cldb_mb_per_1k" if s == "cl" else ".offchain_mb_per_1k")]
+    store = N[k + (".cldb_mb_per_1k" if s in ("cl", "cls") else ".offchain_mb_per_1k")]
     cost.append(" & ".join([lab, f2(N[k+".link_mb_per_1k"]), f2(N[k+".ledger_mb_per_1k"]), f2(store), f2(N[k+".cpu_s_per_1k"])]) + r" \\")
 cost += [r"\bottomrule", r"\end{tabular}"]
 open(os.path.join(out, "table_cost.tex"), "w").write("\n".join(cost) + "\n")
@@ -132,7 +149,7 @@ for s, byD in e2.items():
     for D, v in byD.items():
         m, sd = ms(list(v.values()))
         N[f"e2.{s}.D{D}"] = {"mean": m, "std": sd, "per_seed": v}
-for s in ("ha", "cl"):
+for s in ("ha", "cl", "cls"):
     for D in e2.get("ofcc", {}):
         if D in e2.get(s, {}):
             N[f"paired.e2.ofcc_minus_{s}.D{D}"] = paired(e2["ofcc"][D], e2[s][D])
@@ -147,6 +164,30 @@ for f in glob.glob(os.path.join(raw, "**", "e3_*.json"), recursive=True):
 for k in [k for k in N if k.startswith("e3.") and isinstance(N[k], dict) and "mean" not in N[k]]:
     m, sd = ms(list(N[k].values()))
     N[k] = {"mean": m, "std": sd, "per_seed": N[k]}
+
+# org scaling: paired throughput / p95 at each load, 3 orgs minus 5 orgs (same runner job per seed)
+for L in (800, 1600):
+    for m in ("throughput_items_per_s", "item_latency_p95_s"):
+        a = N.get(f"e3.scale.ofcc.orgs3.L{L}.{m}", {}).get("per_seed", {})
+        b = N.get(f"e3.scale.ofcc.orgs5.L{L}.{m}", {}).get("per_seed", {})
+        if a and b:
+            N[f"paired.e3.orgs3_minus_orgs5.L{L}.{m}"] = paired(a, b)
+
+# benign link loss
+for f in glob.glob(os.path.join(raw, "**", "eloss_*.json"), recursive=True):
+    d = json.load(open(f))
+    s = str(d["seed"])
+    N.setdefault("eloss.complete_rate", {})[s] = d["complete"] / d["items"]
+    N.setdefault("eloss.items", {})[s] = d["items"]
+    N.setdefault("eloss.lost_syncs", {})[s] = d["lost_syncs"]
+    N.setdefault("eloss.lost_acks", {})[s] = d["lost_acks"]
+    k = d["alert_kinds"]
+    N.setdefault("eloss.duplicates", {})[s] = k.get("duplicate", 0)
+    N.setdefault("eloss.non_duplicate_alerts", {})[s] = sum(v for kk, v in k.items() if kk != "duplicate")
+for k in [k for k in N if k.startswith("eloss.")]:
+    if "mean" not in N[k]:
+        m, sd = ms(list(N[k].values()))
+        N[k] = {"mean": m, "std": sd, "per_seed": N[k], "sum": sum(N[k].values())}
 
 # ---------------- clock
 for f in glob.glob(os.path.join(raw, "**", "eclock_*.json"), recursive=True):

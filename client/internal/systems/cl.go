@@ -367,6 +367,9 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 				if o < 0 {
 					o, rd = t.orig(r.GW, d)
 				}
+				if o < 0 && c.Signed { // signed records: the sequence number is fixed by the signature
+					o, rd = r.Seq, t.roundOf(r.GW, r.Seq)
+				}
 				if rd < 0 {
 					rd = r.Round
 				}
@@ -383,6 +386,9 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 				o, rd := t.orig(r.GW, r.D) // digest recorded at ingest
 				if o < 0 {
 					o, rd = t.orig(r.GW, d)
+				}
+				if o < 0 && c.Signed { // signed records: the sequence number is fixed by the signature
+					o, rd = r.Seq, t.roundOf(r.GW, r.Seq)
 				}
 				if rd < 0 {
 					rd = r.Round
@@ -415,6 +421,13 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 			out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: rd, Orig: o, Kind: "dupseq"})
 		}
 		seen[k] = true
+		if r.Seq < last[r.GW] { // a row older than one already seen: out of order
+			o, rd := t.orig(r.GW, r.D)
+			if o < 0 && c.Signed {
+				o, rd = r.Seq, t.roundOf(r.GW, r.Seq)
+			}
+			out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: rd, Orig: o, Kind: "order"})
+		}
 		if r.Seq > last[r.GW]+1 {
 			for s := last[r.GW] + 1; s < r.Seq; s++ {
 				out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: t.roundOf(r.GW, s), Orig: s, Kind: "gap"})

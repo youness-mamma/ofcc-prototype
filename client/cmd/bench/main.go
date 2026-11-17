@@ -205,13 +205,14 @@ type e1Result struct {
 	CPU        map[string]float64 `json:"cpu_seconds"`
 	WallSec    float64           `json:"wall_seconds"`
 	Alerts     []systems.Alert   `json:"alerts"`
+	Incomplete [][2]int64        `json:"incomplete_untouched_sample"`
 }
 
 func e1(args []string) {
 	fs := flag.NewFlagSet("e1", flag.ExitOnError)
 	var c common
 	c.flags(fs)
-	rounds := fs.Int("rounds", 25, "sync rounds per gateway")
+	rounds := fs.Int("rounds", 40, "sync rounds per gateway")
 	perType := fs.Int("pre", 20, "pre-upload operations per type")
 	postType := fs.Int("post", 10, "post-upload operations per type")
 	adv := fs.String("adversary", "adaptive", "naive|adaptive")
@@ -240,16 +241,20 @@ func e1(args []string) {
 			maxItems = tot
 		}
 	}
-	// pre-upload operation schedule (round 0 stays clean so that replay has history)
+	// pre-upload operation schedule: only odd rounds 1..R-3, so tampered rounds are never adjacent,
+	// round 0 is clean (replay needs history) and the round after each tampered round exists and is clean.
 	var slots [][2]int
 	for g := 0; g < c.gws; g++ {
-		for r := 1; r < *rounds; r++ {
+		for r := 1; r <= *rounds-3; r += 2 {
 			slots = append(slots, [2]int{g, r})
 		}
 	}
 	sr := rand.New(rand.NewSource(c.seed*31 + 7))
 	sr.Shuffle(len(slots), func(i, j int) { slots[i], slots[j] = slots[j], slots[i] })
 	pre := map[[2]int]*tamper.Op{}
+	if len(slots) < len(tamper.Ops)**perType {
+		must(fmt.Errorf("not enough non-adjacent slots (%d) for %d operations", len(slots), len(tamper.Ops)**perType))
+	}
 	k := 0
 	for _, t := range tamper.Ops {
 		for i := 0; i < *perType && k < len(slots); i++ {
@@ -283,6 +288,7 @@ func e1(args []string) {
 			defer wg.Done()
 			g := gws[gi]
 			var hist []*sim.Record
+			compromised := false // adaptive adversary keeps normalizing an unsigned store once it controls it
 			vt := t0
 			for r := 0; r < *rounds; r++ {
 				recs := make([]*sim.Record, sizes[gi][r])
@@ -294,7 +300,13 @@ func e1(args []string) {
 				if op, ok := pre[[2]int{gi, r}]; ok {
 					orng := rand.New(rand.NewSource(c.seed*1009 + int64(gi)*97 + int64(r)))
 					recs = tamper.ApplyPre(op, recs, hist, adaptive, sys.Repairer(g), orng)
+					compromised = adaptive
 				} else {
+					if compromised {
+						if rp := sys.Repairer(g); !rp.Signed {
+							rp.Repair(recs)
+						}
+					}
 					mu.Lock()
 					clean[gi] = append(clean[gi], recs...)
 					mu.Unlock()
@@ -388,10 +400,12 @@ func e1(args []string) {
 	// ----- scoring against ground truth
 	all := append(alerts, vout.Alerts...)
 	touched := map[[2]int64]bool{}
-	preRound := map[[2]int]bool{}
+	preRound := map[[2]int]bool{}  // rounds with a pre-upload operation
+	nextRound := map[[2]int]bool{} // the following round (detection window, excluded from false alarms)
 	for _, op := range ops {
 		if op.Pos == "pre" {
 			preRound[[2]int{op.GW, op.Round}] = true
+			nextRound[[2]int{op.GW, op.Round + 1}] = true
 		}
 		for _, t := range op.Targets {
 			touched[[2]int64{int64(op.GW), t}] = true
@@ -410,7 +424,7 @@ func e1(args []string) {
 			if a.GW != op.GW && op.Pos == "pre" {
 				continue
 			}
-			if op.Pos == "pre" && a.Round == op.Round {
+			if op.Pos == "pre" && (a.Round == op.Round || a.Round == op.Round+1) { // same or next sync
 				op.Detected = true
 			}
 			if op.Pos == "post" {
@@ -431,6 +445,7 @@ func e1(args []string) {
 		}
 	}
 	items, untouched, complete := 0, 0, 0
+	var incomplete [][2]int64
 	for gi := 0; gi < c.gws; gi++ {
 		for o, r := range truth.RoundOf[gi] {
 			items++
@@ -440,6 +455,8 @@ func e1(args []string) {
 			untouched++
 			if vout.Complete[gi][o] {
 				complete++
+			} else if len(incomplete) < 50 {
+				incomplete = append(incomplete, [2]int64{int64(gi), o})
 			}
 		}
 	}
@@ -448,16 +465,16 @@ func e1(args []string) {
 	cleanRounds := 0
 	for gi := 0; gi < c.gws; gi++ {
 		for r := 0; r < *rounds; r++ {
-			if !preRound[[2]int{gi, r}] {
+			if !preRound[[2]int{gi, r}] && !nextRound[[2]int{gi, r}] {
 				cleanRounds++
 			}
 		}
 	}
 	for _, a := range all {
-		if a.Orig >= 0 && !touched[[2]int64{int64(a.GW), a.Orig}] && !preRound[[2]int{a.GW, a.Round}] {
+		if a.Orig >= 0 && !touched[[2]int64{int64(a.GW), a.Orig}] && !preRound[[2]int{a.GW, a.Round}] && !nextRound[[2]int{a.GW, a.Round}] {
 			faItems[[2]int64{int64(a.GW), a.Orig}] = true
 		}
-		if a.Round >= 0 && !preRound[[2]int{a.GW, a.Round}] && a.Orig < 0 && a.Key == "" {
+		if a.Round >= 0 && !preRound[[2]int{a.GW, a.Round}] && !nextRound[[2]int{a.GW, a.Round}] && a.Orig < 0 && a.Key == "" {
 			faRounds[[2]int{a.GW, a.Round}] = true
 		}
 	}
@@ -472,13 +489,14 @@ func e1(args []string) {
 	})
 	res := e1Result{Exp: "e1", System: c.system, Seed: c.seed, Adversary: *adv, Env: env(),
 		Config: map[string]any{"gws": c.gws, "rounds": *rounds, "pre_per_type": *perType, "post_per_type": *postType,
-			"b": c.b, "orgs": c.orgs, "batch_timeout": c.batchTimeout, "xfer_frac": *xferFrac, "items_per_round": "20-60"},
+			"b": c.b, "orgs": c.orgs, "batch_timeout": c.batchTimeout, "xfer_frac": *xferFrac, "items_per_round": "20-60",
+			"detection_window": "same or next sync of the gateway", "pre_op_rounds": "odd rounds 1..R-3"},
 		Items: items, Ops: ops, Untouched: untouched, Complete: complete, FAItems: len(faItems),
 		CleanRnds: cleanRounds, FARounds: len(faRounds), Transfers: xok, TransferEr: xerr, LinkBytes: link, Txs: txs,
 		Storage: map[string]int64{"ledger_all_peers": led1 - led0, "offchain": st1 - st0},
 		CPU: map[string]float64{"fabric": cpu1.fabric - cpu0.fabric, "client": cpu1.client - cpu0.client,
 			"minio": cpu1.minio - cpu0.minio, "cl_server": cpu1.clsrv - cpu0.clsrv},
-		WallSec: wall, Alerts: all}
+		WallSec: wall, Alerts: all, Incomplete: incomplete}
 	if clp != nil {
 		if fi, err := os.Stat(clp.db); err == nil {
 			res.Storage["cl_db"] = fi.Size()

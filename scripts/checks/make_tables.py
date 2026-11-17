@@ -102,16 +102,16 @@ def cell(entry):
     m, sd = entry["mean"], entry["std"]
     return pct(m) if sd < 1e-9 else f"{100*m:.0f}$\\pm${100*sd:.0f}"
 
-lines = [r"\begin{tabular}{@{}llrrrrrrrrrrrrr@{}}", r"\toprule",
-         r" & & \multicolumn{8}{c}{Before upload} & After & \multicolumn{2}{c}{Custody} & FA & Compl. \\ \cmidrule(lr){3-10}\cmidrule(lr){12-13}",
-         "System & Adv. & " + " & ".join(OPHDR) + r" & Item & upload & Forge & Rewr. & (\%) & (\%) \\", r"\midrule"]
+lines = [r"\begin{tabular}{@{}llrrrrrrrrrrrr@{}}", r"\toprule",
+         r" & & \multicolumn{8}{c}{Before upload} & After & \multicolumn{2}{c}{Custody} & FA \\ \cmidrule(lr){3-10}\cmidrule(lr){12-13}",
+         "System & Adv. & " + " & ".join(OPHDR) + r" & Item & upload & Forge & Rewr. & (\%) \\", r"\midrule"]
 for s, a, lab in ROWS:
     if (s, a) not in e1:
         continue
     k = f"e1.{s}.{a}"
     row = [lab, "A" if a == "adaptive" else "N"] + [cell(N[f"{k}.det.pre.{op}"]) for op in OPS]
     row += [cell(N[f"{k}.det_item.pre.all"]), cell(N[f"{k}.det.post.all"]), ccell(N.get(f"{k}.custody.forge")), ccell(N.get(f"{k}.custody.rewrite")),
-            f"{100*N[k+'.fa_rate']['mean']:.1f}", f"{100*N[k+'.completeness']['mean']:.1f}"]
+            f"{100*N[k+'.fa_rate']['mean']:.1f}"]
     lines.append(" & ".join(row) + r" \\")
     if s in ("noEnc", "cl") and a == "adaptive" and s == "noEnc":
         lines.append(r"\midrule")
@@ -120,11 +120,11 @@ open(os.path.join(out, "table_detection.tex"), "w").write("\n".join(lines) + "\n
 
 cost = [r"\begin{tabular}{@{}lrrrr@{}}", r"\toprule",
         r"System & Link (MB) & Ledger (MB) & Off-chain or DB (MB) & CPU (s) \\", r"\midrule"]
-for s, lab in (("ofcc", "OFCC"), ("noEnc", "OFCC-noEnc"), ("ha", "HA"), ("cls", "CL-S"), ("cl", "CL")):
+for s, lab in (("ofcc", "OFCC"), ("noEnc", "noEnc"), ("ha", "HA"), ("cls", "CL-S"), ("cl", "CL")):
     k = f"e1.{s}.adaptive"
     if k + ".link_mb_per_1k" not in N:
         continue
-    f2 = lambda e: f"{e['mean']:.1f}$\\pm${e['std']:.1f}"
+    f2 = lambda e: "--" if abs(e['mean']) < 1e-9 else (f"{e['mean']:.1f}$\\pm${e['std']:.1f}" if e['std'] >= 0.05 else f"{e['mean']:.1f}" + r"$\pm{<}0.1$")
     store = N[k + (".cldb_mb_per_1k" if s in ("cl", "cls") else ".offchain_mb_per_1k")]
     cost.append(" & ".join([lab, f2(N[k+".link_mb_per_1k"]), f2(N[k+".ledger_mb_per_1k"]), f2(store), f2(N[k+".cpu_s_per_1k"])]) + r" \\")
 cost += [r"\bottomrule", r"\end{tabular}"]
@@ -206,6 +206,18 @@ for k in [k for k in N if k.startswith("clock.")]:
     if "mean" not in N[k]:
         m, sd = ms(list(N[k].values()))
         N[k] = {"mean": m, "std": sd, "per_seed": N[k]}
+
+# ---------------- derived quantities cited in the text
+# exact two-sided 95% Clopper-Pearson lower bound for n successes out of n
+for n in (100, 700):
+    N[f"derived.cp_lower_{n}_of_{n}"] = 0.025 ** (1 / n)
+# link volume after the 20-minute outage (9,600 items) and its transfer time at an assumed 4 Mbit/s satellite link
+mb = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * 9.6
+N["derived.link_mb_D20"] = mb
+N["derived.link_minutes_D20_at_4mbit"] = mb * 2**20 * 8 / 4e6 / 60
+# offered load expressed in vessels at 8 gateways x 1 item/s per vessel
+N["derived.vessels_at_50"] = 50 / 8
+N["derived.vessels_at_1600"] = 1600 / 8
 
 json.dump(N, open(os.path.join(out, "numbers.json"), "w"), indent=1, sort_keys=True, default=str)
 print("wrote tables and", len(N), "numbers to", out)

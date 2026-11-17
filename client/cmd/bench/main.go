@@ -463,7 +463,14 @@ func e1(args []string) {
 		for i := 0; i < *postType; i++ {
 			gi, a, b := pick()
 			op := &tamper.Op{Type: t, Pos: "post", GW: gi, Round: truth.RoundOf[gi][a.Orig]}
-			must(sys.Post(op, gws[gi], a, b, adaptive, pr))
+			err := sys.Post(op, gws[gi], a, b, adaptive, pr)
+			for errors.Is(err, systems.ErrSourceGone) { // redraw only in this rare case (other seeds unchanged)
+				delete(used, [2]int64{int64(gi), a.Orig})
+				gi, a, b = pick()
+				op = &tamper.Op{Type: t, Pos: "post", GW: gi, Round: truth.RoundOf[gi][a.Orig]}
+				err = sys.Post(op, gws[gi], a, b, adaptive, pr)
+			}
+			must(err)
 			for _, ref := range op.Refs { // cross-gateway targets (CL truncate)
 				if o, ok := truth.OrigOf[ref.GW][ref.D]; ok && ref.GW == gi {
 					op.Targets = append(op.Targets, o)

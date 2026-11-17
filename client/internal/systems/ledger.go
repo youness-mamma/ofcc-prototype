@@ -1,6 +1,7 @@
 package systems
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -154,6 +155,9 @@ func (l *Ledger) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (Syn
 
 // Post tampers with the off-chain store after upload (an insider of one organization).
 // Ledger records cannot be changed by a single organization (A4), so entry-level operations are N/A.
+// ErrSourceGone: the replay source no longer exists in the store.
+var ErrSourceGone = errors.New("replay source gone")
+
 func (l *Ledger) Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, adaptive bool, rng *rand.Rand) error {
 	k := l.key(g, target)
 	op.Targets = []int64{target.Orig}
@@ -173,7 +177,10 @@ func (l *Ledger) Post(op *tamper.Op, g *sim.Gateway, target, other *sim.Record, 
 		return l.St.Put(fk, flip(target.Cipher, rng))
 	case "replay": // copy another item's object over the target's key
 		b, err := l.St.Get(l.key(g, other))
-		if err != nil || b == nil {
+		if err == nil && b == nil {
+			return ErrSourceGone // source object removed by an earlier delete; caller redraws
+		}
+		if err != nil {
 			return fmt.Errorf("post replay: %v", err)
 		}
 		return l.St.Put(k, b)

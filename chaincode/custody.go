@@ -413,7 +413,17 @@ func (c *Contract) AnchorDigests(ctx contractapi.TransactionContextInterface, ba
 	}
 	tx := ctx.GetStub().GetTxID()
 	var ev []model.Event
+	seen := map[string]string{} // Fabric does not read a transaction's own writes: track this batch in memory
 	for _, it := range b.Items {
+		if d, dup := seen[it.ID]; dup {
+			t := "conflict"
+			if d == it.D {
+				t = "duplicate"
+			}
+			ev = append(ev, model.Event{Type: t, Pg: b.Pg, ID: it.ID, Tx: tx})
+			continue
+		}
+		seen[it.ID] = it.D
 		old, _ := getItem(ctx, b.Pg, it.ID)
 		if old != nil {
 			t := "conflict"

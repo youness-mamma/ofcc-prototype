@@ -67,3 +67,15 @@ func (s *Store) List(prefix string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// Size returns the total bytes of all objects in the bucket.
+func (s *Store) Size() (int64, error) {
+	var n int64
+	for o := range s.c.ListObjects(context.Background(), s.Bucket, minio.ListObjectsOptions{Recursive: true}) {
+		if o.Err != nil {
+			return 0, o.Err
+		}
+		n += o.Size
+	}
+	return n, nil
+}

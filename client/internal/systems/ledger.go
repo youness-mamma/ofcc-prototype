@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
+	"time"
 
 	"ofcc/chaincode/model"
+	"ofcc/client/internal/fab"
 	"ofcc/client/internal/sim"
 	"ofcc/client/internal/store"
 	"ofcc/client/internal/tamper"
@@ -181,13 +184,28 @@ func (l *Ledger) itemID(g *sim.Gateway, r *sim.Record) string {
 	return model.EntryHash(g.Pg, r.Entry())
 }
 
+// Transfer performs collector -> investigator -> second investigator. Each step is retried on its own;
+// a retry that finds the step already applied ("not the current custodian" after an earlier attempt) is accepted.
 func (l *Ledger) Transfer(g *sim.Gateway, r *sim.Record) error {
 	id := l.itemID(g, r)
-	if _, _, _, err := l.C.Collector.Submit("TransferCustody", g.Pg, id, investigator); err != nil {
+	step := func(c *fab.Conn, to string) error {
+		var err error
+		for try := 0; try < 3; try++ {
+			_, _, _, err = c.Submit("TransferCustody", g.Pg, id, to)
+			if err == nil {
+				return nil
+			}
+			if try > 0 && strings.Contains(err.Error(), "not the current custodian") {
+				return nil // the earlier attempt committed after all
+			}
+			time.Sleep(time.Second)
+		}
 		return err
 	}
-	_, _, _, err := l.C.Investigator.Submit("TransferCustody", g.Pg, id, investigator2)
-	return err
+	if err := step(l.C.Collector, investigator); err != nil {
+		return err
+	}
+	return step(l.C.Investigator, investigator2)
 }
 
 func (l *Ledger) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
@@ -273,3 +291,6 @@ func (l *Ledger) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 	sortAlerts(out.Alerts)
 	return out, nil
 }
+
+// OffchainBytes returns the bytes held in this run's bucket.
+func (l *Ledger) OffchainBytes() int64 { n, _ := l.St.Size(); return n }

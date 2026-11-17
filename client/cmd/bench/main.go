@@ -202,7 +202,9 @@ type e1Result struct {
 	LinkBytes  int64             `json:"link_bytes"`
 	Txs        int               `json:"txs"`
 	Storage    map[string]int64  `json:"storage_bytes"`
-	CPU        map[string]float64 `json:"cpu_seconds"`
+	CPU        map[string]float64 `json:"cpu_seconds"` // capture + synchronization phase only
+	CPUVerify  map[string]float64 `json:"cpu_seconds_verify"`
+	SyncWall   float64           `json:"sync_phase_wall_seconds"`
 	WallSec    float64           `json:"wall_seconds"`
 	Alerts     []systems.Alert   `json:"alerts"`
 	Incomplete [][2]int64        `json:"incomplete_untouched_sample"`
@@ -273,7 +275,7 @@ func e1(args []string) {
 	}
 	t0 := time.Now().Add(-time.Duration(maxItems+120) * time.Second).UnixNano()
 	cpu0 := snap(minioPID(), clp)
-	led0, st0 := ledgerBytes(c.orgs), metrics.DirBytes(c.minioData)
+	led0 := ledgerBytes(c.orgs)
 	start := time.Now()
 
 	var mu sync.Mutex
@@ -337,6 +339,8 @@ func e1(args []string) {
 	if err := <-errc; err != nil {
 		must(err)
 	}
+	syncWall := time.Since(start).Seconds()
+	cpuSync := snap(minioPID(), clp) // capture + synchronization only (normal operation)
 
 	// custody transfers and post-upload tampering on clean-round items (disjoint sets)
 	pr := rand.New(rand.NewSource(c.seed*53 + 11))
@@ -368,13 +372,7 @@ func e1(args []string) {
 		go func(gi int, a *sim.Record) {
 			defer xwg.Done()
 			defer func() { <-sem }()
-			var err error
-			for try := 0; try < 3; try++ { // retry transient endorsement/commit failures, keep the message
-				if err = sys.Transfer(gws[gi], a); err == nil {
-					break
-				}
-				time.Sleep(time.Second)
-			}
+			err := sys.Transfer(gws[gi], a) // each step retried inside Transfer
 			xmu.Lock()
 			if err != nil {
 				xerr++
@@ -405,11 +403,16 @@ func e1(args []string) {
 			ops = append(ops, op)
 		}
 	}
+	cpuV0 := snap(minioPID(), clp)
 	vout, err := sys.Verify(gws, truth)
 	must(err)
 	wall := time.Since(start).Seconds()
-	cpu1 := snap(minioPID(), clp)
-	led1, st1 := ledgerBytes(c.orgs), metrics.DirBytes(c.minioData)
+	cpuV1 := snap(minioPID(), clp)
+	led1 := ledgerBytes(c.orgs)
+	var off int64
+	if l, ok := sys.(*systems.Ledger); ok {
+		off = l.OffchainBytes()
+	}
 
 	// ----- scoring against ground truth
 	all := append(alerts, vout.Alerts...)
@@ -507,10 +510,12 @@ func e1(args []string) {
 			"detection_window": "same or next sync of the gateway", "pre_op_rounds": "odd rounds 1..R-3"},
 		Items: items, Ops: ops, Untouched: untouched, Complete: complete, FAItems: len(faItems),
 		CleanRnds: cleanRounds, FARounds: len(faRounds), Transfers: xok, TransferEr: xerr, LinkBytes: link, Txs: txs,
-		Storage: map[string]int64{"ledger_all_peers": led1 - led0, "offchain": st1 - st0},
-		CPU: map[string]float64{"fabric": cpu1.fabric - cpu0.fabric, "client": cpu1.client - cpu0.client,
-			"minio": cpu1.minio - cpu0.minio, "cl_server": cpu1.clsrv - cpu0.clsrv},
-		WallSec: wall, Alerts: all, Incomplete: incomplete, XferErrMsg: xmsgs}
+		Storage: map[string]int64{"ledger_blocks_all_peers": led1 - led0, "offchain": off},
+		CPU: map[string]float64{"fabric": cpuSync.fabric - cpu0.fabric, "client": cpuSync.client - cpu0.client,
+			"minio": cpuSync.minio - cpu0.minio, "cl_server": cpuSync.clsrv - cpu0.clsrv},
+		CPUVerify: map[string]float64{"fabric": cpuV1.fabric - cpuV0.fabric, "client": cpuV1.client - cpuV0.client,
+			"minio": cpuV1.minio - cpuV0.minio},
+		SyncWall: syncWall, WallSec: wall, Alerts: all, Incomplete: incomplete, XferErrMsg: xmsgs}
 	if clp != nil {
 		if fi, err := os.Stat(clp.db); err == nil {
 			res.Storage["cl_db"] = fi.Size()

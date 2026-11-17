@@ -53,7 +53,7 @@ def e1(raw):
             "completeness": d["complete_untouched_items"] / d["untouched_items"],
             "items": d["items"], "transfers_ok": d["transfers_ok"], "transfer_errors": d["transfer_errors"],
             "link_kb_per_1k": d["link_bytes"] / 1024 / k,
-            "ledger_kb_per_1k": d["storage_bytes"].get("ledger_all_peers", 0) / 1024 / k,
+            "ledger_kb_per_1k": (d["storage_bytes"].get("ledger_blocks_all_peers") or d["storage_bytes"].get("ledger_all_peers", 0)) / 1024 / k,
             "offchain_kb_per_1k": d["storage_bytes"].get("offchain", 0) / 1024 / k,
             "cl_db_kb_per_1k": d["storage_bytes"].get("cl_db", 0) / 1024 / k,
             "cpu_s_per_1k": sum(v for v in cpu.values()) / k,

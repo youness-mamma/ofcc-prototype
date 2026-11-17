@@ -334,22 +334,27 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 	if err != nil {
 		return out, err
 	}
-	brk := len(rows)
-	prev := ""
+	// Per-row verification: row i is valid if its own hash matches and it links to row i-1.
+	bad := make([]bool, len(rows))
 	for i, r := range rows {
 		d := r.D
 		if r.Kind == "item" {
 			p, _ := base64.StdEncoding.DecodeString(r.P)
 			d = model.H(p)
 		}
-		if r.Prev != prev || rowHash(r) != r.H || d != r.D {
-			o, rd := t.orig(r.GW, r.D)
-			out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: rd, Orig: o, Kind: "chain"})
-			brk = i
-			break
+		prev := ""
+		if i > 0 {
+			prev = rows[i-1].H
 		}
-		prev = r.H
+		if r.Prev != prev || rowHash(r) != r.H || d != r.D {
+			bad[i] = true
+			if r.Kind == "item" {
+				o, rd := t.orig(r.GW, r.D)
+				out.Alerts = append(out.Alerts, Alert{GW: r.GW, Round: rd, Orig: o, Kind: "chain"})
+			}
+		}
 	}
+	brk := len(rows)
 	// sequence check per gateway over the stored log
 	last := map[int]int64{}
 	seen := map[[2]int64]bool{}
@@ -381,8 +386,8 @@ func (c *CL) Verify(gws []*sim.Gateway, t *Truth) (VerifyOut, error) {
 			last[r.GW] = r.Seq
 		}
 	}
-	for _, r := range rows[:brk] {
-		if r.Kind != "item" {
+	for i, r := range rows[:brk] {
+		if r.Kind != "item" || bad[i] {
 			continue
 		}
 		o, _ := t.orig(r.GW, r.D)

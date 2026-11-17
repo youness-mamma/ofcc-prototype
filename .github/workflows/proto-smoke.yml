@@ -34,7 +34,7 @@ jobs:
           for s in ofcc noChain noSig noSeq noEnc ha cl; do
             ./bin/bench e1 -system $s -seed 101 -adversary adaptive -rounds 16 -pre 2 -post 2 -gws 3 -minio-data minio-data
           done
-          ./bin/bench e1 -system ofcc -seed 101 -adversary naive -rounds 16 -pre 2 -post 2 -gws 3 -minio-data minio-data
+          for s in ofcc ha cl; do ./bin/bench e1 -system $s -seed 101 -adversary naive -rounds 16 -pre 2 -post 2 -gws 3 -minio-data minio-data; done
       - name: E2 tiny
         run: for s in ofcc ha cl; do ./bin/bench e2 -system $s -seed 101 -outages 1 -gws 3; done
       - name: E3 tiny

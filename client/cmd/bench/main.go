@@ -105,6 +105,8 @@ func startCL(dir string) (*clProc, *systems.CL) {
 
 func (p *clProc) stop() { p.cmd.Process.Kill(); p.cmd.Wait() }
 
+func (p *clProc) remove() { os.Remove(p.db) }
+
 // newSystem builds the system under test; for cl it also starts the server process.
 func newSystem(c *common, cs *systems.Conns, bucket string) (systems.System, model.Mode, *clProc) {
 	if c.system == "cl" {
@@ -621,6 +623,9 @@ func e3(args []string) {
 		LatMean    float64 `json:"latency_mean_s"`
 		LatP50     float64 `json:"latency_p50_s"`
 		LatP95     float64 `json:"latency_p95_s"`
+		ItemMean   float64 `json:"item_latency_mean_s"`
+		ItemP50    float64 `json:"item_latency_p50_s"`
+		ItemP95    float64 `json:"item_latency_p95_s"`
 		Batches    int     `json:"batches_in_window"`
 		Errors     int     `json:"errors"`
 		CPU        map[string]float64 `json:"cpu_seconds"`
@@ -679,8 +684,9 @@ func e3(args []string) {
 		case <-time.After(120 * time.Second):
 		}
 		close(resc)
-		var lats []float64
+		var lats, ilats []float64
 		committed, nb, errs := 0, 0, 0
+		fill := 1.0 / float64(L) // items arrive at rate L; item i of a batch waited (b-1-i)/L for the batch to fill
 		for r := range resc {
 			if !r.ok {
 				errs++
@@ -690,11 +696,23 @@ func e3(args []string) {
 				committed += c.b
 			}
 			if !r.sched.Before(ws) && r.sched.Before(we) {
-				lats = append(lats, r.done.Sub(r.sched).Seconds())
+				bl := r.done.Sub(r.sched).Seconds()
+				lats = append(lats, bl)
+				for i := 0; i < c.b; i++ {
+					ilats = append(ilats, bl+float64(c.b-1-i)*fill)
+				}
 				nb++
 			}
 		}
 		sort.Float64s(lats)
+		sort.Float64s(ilats)
+		imean := 0.0
+		for _, x := range ilats {
+			imean += x
+		}
+		if len(ilats) > 0 {
+			imean /= float64(len(ilats))
+		}
 		mean := 0.0
 		for _, x := range lats {
 			mean += x
@@ -704,10 +722,12 @@ func e3(args []string) {
 		}
 		if clp != nil {
 			clp.stop()
+			clp.remove()
 		}
 		_ = cpu0
 		rows = append(rows, row{Load: L, Throughput: float64(committed) / meas.Seconds(), LatMean: mean,
-			LatP50: pct(lats, 0.5), LatP95: pct(lats, 0.95), Batches: nb, Errors: errs,
+			LatP50: pct(lats, 0.5), LatP95: pct(lats, 0.95), ItemMean: imean, ItemP50: pct(ilats, 0.5), ItemP95: pct(ilats, 0.95),
+			Batches: nb, Errors: errs,
 			CPU: map[string]float64{"fabric": cpuW1.fabric - cpuW0.fabric, "client": cpuW1.client - cpuW0.client,
 				"minio": cpuW1.minio - cpuW0.minio, "cl_server": cpuW1.clsrv - cpuW0.clsrv, "window_s": meas.Seconds()}})
 		fmt.Printf("e3 %s L=%d thr=%.1f p50=%.3f p95=%.3f errs=%d\n", c.system, L, float64(committed)/meas.Seconds(), pct(lats, 0.5), pct(lats, 0.95), errs)
@@ -716,7 +736,7 @@ func e3(args []string) {
 		"exp": "e3", "system": c.system, "seed": c.seed, "env": env(),
 		"config": map[string]any{"b": c.b, "orgs": c.orgs, "batch_timeout": c.batchTimeout, "pool": *pool,
 			"warmup_s": warm.Seconds(), "measure_s": meas.Seconds(),
-			"latency": "commit time minus scheduled submission time of the batch (includes queueing and payload upload)"},
+			"latency": "batch: commit time minus scheduled submission time (includes queueing and payload upload); item: batch latency plus the time the item waited for its batch to fill at the offered rate"},
 		"rows": rows})
 }
 

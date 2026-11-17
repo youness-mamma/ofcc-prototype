@@ -1,0 +1,50 @@
+name: tune
+# Tuning on VALIDATION seeds only (801, 802). Grid: orderer batch timeout x batch size b.
+# Pre-registered objective: lowest sync time after a 10-minute outage (8 gateways), subject to
+# item-level p95 latency <= 2 s at 100 items/s. Selection: scripts/checks/select_tuning.py.
+on:
+  workflow_dispatch:
+
+env:
+  FABRIC_VERSION: "2.5.16"
+  FABRIC_CA_VERSION: "1.5.22"
+  INSTALL_SCRIPT_SHA: "f1f5e006a6301b5c98611b24a7ec4aeeda6c283a"
+  MINIO_RELEASE: "RELEASE.2025-10-15T17-29-55Z"
+
+jobs:
+  tune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        bt: ["0.5s", "1s", "2s"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: client/go.sum
+      - uses: actions/cache@v4
+        with:
+          path: minio-bin
+          key: minio-${{ env.MINIO_RELEASE }}
+      - name: Setup
+        run: ./.github/actions-setup.sh
+      - name: Network up (4 orgs, batch timeout ${{ matrix.bt }})
+        run: ./network/up.sh 4 ${{ matrix.bt }} 100
+      - name: Bootstrap
+        run: ./bin/bench bootstrap
+      - name: Grid on validation seeds
+        run: |
+          for seed in 801 802; do
+            for b in 10 50 100 200; do
+              ./bin/bench e2 -system ofcc -seed $seed -outages 10 -b $b -bt ${{ matrix.bt }} -tag _bt${{ matrix.bt }}_b$b -out results/raw/tune
+              ./bin/bench e3 -system ofcc -seed $seed -loads 100 -warmup 30s -measure 90s -b $b -bt ${{ matrix.bt }} -tag _bt${{ matrix.bt }}_b$b -out results/raw/tune
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tune-${{ matrix.bt }}
+          path: results/raw/

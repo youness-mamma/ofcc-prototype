@@ -105,7 +105,7 @@ for cid, x, y, lab in [("p1", 20, 304, "Org 1 peer"), ("p2", 175, 304, "Org 2 pe
                        ("p3", 20, 352, "Org 3 peer"), ("p4", 175, 352, "Org 4 peer")]:
     box(cid, x, y, 145, 40, lab, BOX_S, "spacingLeft=26;")
     icon("i_" + cid, x + 8, y + 7, 20, 26, SERVER, fill=BOX_S[0])
-box("ca", 20, 402, 300, 48, "Fabric CA: identities and role attributes", BOX_S)
+box("ca", 20, 402, 300, 48, "Fabric identities (X.509) and role table", BOX_S)
 box("cc", 330, 304, 234, 70, "Custody chaincode: batch checks, gaps, custody transfers, access policy", BOX_S)
 box("ord", 330, 384, 234, 66, "Ordering service (three Raft orderers)", BOX_S)
 # off-chain store and verifier
@@ -123,7 +123,7 @@ icon("i_ro", 336, 504, 32, 32, USERS, fill=BOX_S[0])
 edge("e_ro", [(447, 500), (447, 462)])
 text("t_ro", 214, 468, 228, 24, "custody transfers, queries", align="right")
 edge("e_kr", [(210, 520), (330, 520)])
-text("t_kr", 214, 496, 112, 22, "content key", align="center")
+text("t_kr", 214, 496, 112, 22, "content key*", align="center")
 
 # ---------------- cross-link edges (dashed: only when the link is up) ----------------
 edge("e_cc", [(560, 154), (560, 304)], dashed=True)

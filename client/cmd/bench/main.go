@@ -429,6 +429,21 @@ func e1(args []string) {
 		}(gi, a)
 	}
 	xwg.Wait()
+	// custody attacks (ground truth): forge a transfer of an untransferred item; rewrite an existing transfer.
+	// Order matters for CL: all server writes (forged transfers) happen before any insider file edit.
+	type custOp struct {
+		Kind    string `json:"kind"`
+		GW      int    `json:"gw"`
+		Orig    int64  `json:"orig"`
+		Outcome string `json:"outcome"` // prevented | detected | undetected
+	}
+	var custody []*custOp
+	for i := 0; i < *custN; i++ {
+		gi, a, _ := pick()
+		res, err := sys.CustodyAttack("forge", gws[gi], a, adaptive)
+		must(err)
+		custody = append(custody, &custOp{Kind: "forge", GW: gi, Orig: a.Orig, Outcome: res})
+	}
 	var ops []*tamper.Op
 	for _, op := range pre {
 		ops = append(ops, op)
@@ -445,20 +460,6 @@ func e1(args []string) {
 			}
 			ops = append(ops, op)
 		}
-	}
-	// custody attacks (ground truth): forge a transfer of an untransferred item; rewrite an existing transfer
-	type custOp struct {
-		Kind    string `json:"kind"`
-		GW      int    `json:"gw"`
-		Orig    int64  `json:"orig"`
-		Outcome string `json:"outcome"` // prevented | detected | undetected
-	}
-	var custody []*custOp
-	for i := 0; i < *custN; i++ {
-		gi, a, _ := pick()
-		res, err := sys.CustodyAttack("forge", gws[gi], a, adaptive)
-		must(err)
-		custody = append(custody, &custOp{Kind: "forge", GW: gi, Orig: a.Orig, Outcome: res})
 	}
 	for i := 0; i < *custN && i < len(transferred); i++ {
 		gi, a := transferred[i][0].(int), transferred[i][1].(*sim.Record)

@@ -28,10 +28,11 @@ type Ledger struct {
 	txGW  map[string][2]int // tx -> (gw, round)
 	heads map[int][2]string // gw -> (anchored seq as string, anchored hash), public on the ledger
 	anch  map[int]int64
+	tlast map[int]int64
 }
 
 func NewLedger(mode model.Mode, c *Conns, st *store.Store) *Ledger {
-	return &Ledger{Mode: mode, C: c, St: st, txGW: map[string][2]int{}, heads: map[int][2]string{}, anch: map[int]int64{}}
+	return &Ledger{Mode: mode, C: c, St: st, txGW: map[string][2]int{}, heads: map[int][2]string{}, anch: map[int]int64{}, tlast: map[int]int64{}}
 }
 
 func (l *Ledger) Name() string { return l.Mode.Name }
@@ -50,9 +51,9 @@ func (l *Ledger) Repairer(g *sim.Gateway) tamper.Repairer {
 		h = model.Genesis(g.Pg)
 	}
 	if l.Mode.Name == "ha" {
-		return tamper.Repairer{Signed: false, Chain: false, Seq: true, Pg: g.Pg, AnchorSeq: l.anch[g.Idx], AnchorHash: h}
+		return tamper.Repairer{Signed: false, Chain: false, Seq: true, Pg: g.Pg, AnchorSeq: l.anch[g.Idx], AnchorHash: h, AnchorT: l.tlast[g.Idx]}
 	}
-	return tamper.Repairer{Signed: l.Mode.Sig, Chain: l.Mode.Chain, Seq: l.Mode.Seq, Pg: g.Pg, AnchorSeq: l.anch[g.Idx], AnchorHash: h}
+	return tamper.Repairer{Signed: l.Mode.Sig, Chain: l.Mode.Chain, Seq: l.Mode.Seq, Pg: g.Pg, AnchorSeq: l.anch[g.Idx], AnchorHash: h, AnchorT: l.tlast[g.Idx]}
 }
 
 func (l *Ledger) key(g *sim.Gateway, r *sim.Record) string {
@@ -127,12 +128,13 @@ func (l *Ledger) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (Syn
 	gb, err := l.C.Gateway.Evaluate("GetGateway", g.Pg)
 	if err == nil {
 		var st struct {
-			A  int64  `json:"a"`
-			Ha string `json:"ha"`
+			A     int64  `json:"a"`
+			Ha    string `json:"ha"`
+			Tlast int64  `json:"tlast"`
 		}
 		if json.Unmarshal(gb, &st) == nil {
 			l.mu.Lock()
-			l.anch[g.Idx], l.heads[g.Idx] = st.A, [2]string{fmt.Sprint(st.A), st.Ha}
+			l.anch[g.Idx], l.heads[g.Idx], l.tlast[g.Idx] = st.A, [2]string{fmt.Sprint(st.A), st.Ha}, st.Tlast
 			l.mu.Unlock()
 		}
 	}

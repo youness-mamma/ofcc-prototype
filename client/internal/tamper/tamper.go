@@ -41,6 +41,7 @@ type Repairer struct {
 	Pg         string // gateway pseudonym (public)
 	AnchorSeq  int64  // last anchored sequence number (public on the ledger)
 	AnchorHash string // last anchored hash (public on the ledger)
+	AnchorT    int64  // last anchored capture time (public on the ledger)
 }
 
 // Repair renumbers and re-chains records when nothing is signed, so that the batch is self-consistent.
@@ -54,6 +55,15 @@ func (rp Repairer) Repair(recs []*sim.Record) {
 		ts[i] = r.T
 	}
 	sort.Slice(ts, func(a, b int) bool { return ts[a] < ts[b] })
+	for i := range ts { // keep times strictly after the last anchored one and strictly increasing
+		lo := rp.AnchorT
+		if i > 0 {
+			lo = ts[i-1]
+		}
+		if ts[i] <= lo {
+			ts[i] = lo + 1
+		}
+	}
 	prev := rp.AnchorHash
 	for i, r := range recs {
 		r.T = ts[i]

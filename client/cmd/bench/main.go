@@ -486,14 +486,9 @@ func e1(args []string) {
 		if co.Outcome == "prevented" || co.Outcome == "na" {
 			continue
 		}
-		co.Outcome = "undetected"
+		co.Outcome = "undetected" // detected only if the verifier flags this item's custody history
 		if vout.CustodyBroken[co.GW][co.Orig] {
 			co.Outcome = "detected"
-		}
-		for _, a := range vout.Alerts {
-			if a.GW == co.GW && a.Orig == co.Orig {
-				co.Outcome = "detected"
-			}
 		}
 	}
 	preRound := map[[2]int]bool{}  // rounds with a pre-upload operation

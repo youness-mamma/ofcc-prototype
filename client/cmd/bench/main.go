@@ -135,7 +135,7 @@ func snap(minioPID int, cl *clProc) cpuSnap {
 func ledgerBytes(orgs int) int64 {
 	var t int64
 	for i := 1; i <= orgs; i++ {
-		if v := metrics.VolumeBytes(fmt.Sprintf("peer0.org%d.example.com", i), "/var/hyperledger/production/ledgersData"); v > 0 {
+		if v := metrics.VolumeBytes(fmt.Sprintf("peer0.org%d.example.com", i), "/var/hyperledger/production/ledgersData/chains") // append-only block files; v > 0 {
 			t += v
 		}
 	}

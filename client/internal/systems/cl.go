@@ -158,11 +158,19 @@ func (c *CL) Sync(g *sim.Gateway, recs []*sim.Record, round int, b int) (SyncOut
 		for _, r := range ch {
 			req.Recs = append(req.Recs, ingRec{Seq: r.Seq, T: r.T, P: base64.StdEncoding.EncodeToString(r.Cipher)})
 		}
-		alerts, n, lat, err := c.post(req)
+		alerts, _, lat, err := c.post(req)
 		if err != nil {
 			return out, err
 		}
-		out.LinkBytes += n
+		// link bytes = raw payload bytes + metadata (excluding base64 expansion), as for the other systems
+		meta := req
+		meta.Recs = nil
+		for _, r := range ch {
+			meta.Recs = append(meta.Recs, ingRec{Seq: r.Seq, T: r.T})
+			out.LinkBytes += int64(len(r.Cipher))
+		}
+		mb, _ := json.Marshal(meta)
+		out.LinkBytes += int64(len(mb))
 		out.Txs++
 		out.Lat = append(out.Lat, lat.Seconds())
 		for _, a := range alerts {

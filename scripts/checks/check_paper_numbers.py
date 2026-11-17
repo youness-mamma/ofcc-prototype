@@ -9,7 +9,7 @@ import json, re, sys
 
 tex, numf, cfgf = sys.argv[1:4]
 t = open(tex).read()
-body = t[t.index(r"\begin{document}"):t.index(r"\bibliography")]
+body = t[t.index(r"\begin{document}"):t.index(r"\bibliography")].replace("{,}", ",")
 # drop things whose digits are not claims
 for pat in (r"\\cite\{[^}]*\}", r"\\ref\{[^}]*\}", r"\\label\{[^}]*\}", r"\\includegraphics(\[[^\]]*\])?\{[^}]*\}",
             r"\\(sub)*section\*?\{[^}]*\}", r"%[^\n]*", r"\\begin\{(equation|align)\*?\}.*?\\end\{(equation|align)\*?\}",

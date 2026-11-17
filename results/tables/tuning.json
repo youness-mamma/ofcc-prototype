@@ -1,0 +1,122 @@
+{
+ "rule": "min sync time after 10-min outage s.t. item p95 <= 2.0 s at 100 items/s; validation seeds 801-802",
+ "grid": [
+  {
+   "batch_timeout": "0.5s",
+   "b": 10,
+   "sync10_s": 34.3443883845,
+   "item_p95_s": 0.6037054035,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": true
+  },
+  {
+   "batch_timeout": "0.5s",
+   "b": 50,
+   "sync10_s": 8.8296988095,
+   "item_p95_s": 1.0204880215,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": true
+  },
+  {
+   "batch_timeout": "0.5s",
+   "b": 100,
+   "sync10_s": 5.535873167,
+   "item_p95_s": 1.547264968,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": true
+  },
+  {
+   "batch_timeout": "0.5s",
+   "b": 200,
+   "sync10_s": 3.924324559,
+   "item_p95_s": 2.5770100045,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  },
+  {
+   "batch_timeout": "1s",
+   "b": 10,
+   "sync10_s": 68.023434676,
+   "item_p95_s": 1.1727720640000001,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": true
+  },
+  {
+   "batch_timeout": "1s",
+   "b": 50,
+   "sync10_s": 16.577582216,
+   "item_p95_s": 1.6237120895000001,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": true
+  },
+  {
+   "batch_timeout": "1s",
+   "b": 100,
+   "sync10_s": 9.4686550825,
+   "item_p95_s": 2.1038741835,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  },
+  {
+   "batch_timeout": "1s",
+   "b": 200,
+   "sync10_s": 7.958912047,
+   "item_p95_s": 3.2576240954999998,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  },
+  {
+   "batch_timeout": "2s",
+   "b": 10,
+   "sync10_s": 124.029199173,
+   "item_p95_s": 2.0547775015,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  },
+  {
+   "batch_timeout": "2s",
+   "b": 50,
+   "sync10_s": 26.842185755000003,
+   "item_p95_s": 2.462109271,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  },
+  {
+   "batch_timeout": "2s",
+   "b": 100,
+   "sync10_s": 14.8770507465,
+   "item_p95_s": 2.979930933,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  },
+  {
+   "batch_timeout": "2s",
+   "b": 200,
+   "sync10_s": 8.4369806145,
+   "item_p95_s": 4.0195728840000005,
+   "n_sync": 2,
+   "n_p95": 2,
+   "feasible": false
+  }
+ ],
+ "selected": {
+  "batch_timeout": "0.5s",
+  "b": 100,
+  "sync10_s": 5.535873167,
+  "item_p95_s": 1.547264968,
+  "n_sync": 2,
+  "n_p95": 2,
+  "feasible": true
+ }
+}

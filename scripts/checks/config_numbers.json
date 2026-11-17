@@ -28,5 +28,7 @@
  "+3": "clock skew +3 s (bench eclock)",
  "-1": "clock skew -1 h (bench eclock)",
  "+1": "clock skew +1 h (bench eclock)",
- "4.8": "n/a guard"
+ "4.8": "n/a guard",
+ "9,600": "derived setting: 8 gateways x 20 min x 60 items/min (bench e2 -outages, -gws)",
+ "9600": "derived setting: 8 gateways x 20 min x 60 items/min (bench e2 -outages, -gws)"
 }

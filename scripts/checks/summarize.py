@@ -9,6 +9,9 @@ E3 (throughput, latency). With several seeds: mean ± std and paired differences
 import glob, json, math, os, sys, statistics as st
 from collections import defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from scoring import rescore
+
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228}
 OPS = ["modEntry", "modPayload", "delete", "truncate", "insert", "reorder", "replay"]
 
@@ -35,6 +38,7 @@ def e1(raw):
     rows = defaultdict(dict)  # (system, adversary) -> seed -> metrics
     for f in sorted(glob.glob(os.path.join(raw, "e1_*.json"))):
         d = json.load(open(f))
+        d["ops"] = rescore(d)
         det = {}
         for pos in ("pre", "post"):
             for op in OPS:

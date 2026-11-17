@@ -7,6 +7,9 @@ Writes: table_detection.tex, table_cost.tex, numbers.json (every value the paper
 import glob, json, math, os, statistics as st, sys
 from collections import defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from scoring import rescore
+
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447}
 OPS = ["modEntry", "modPayload", "delete", "truncate", "insert", "reorder", "replay"]
 OPHDR = ["ME", "MP", "Del", "Tr", "Ins", "Ro", "Rp"]
@@ -39,11 +42,13 @@ def paired(a, b):
 e1 = defaultdict(dict)
 for f in glob.glob(os.path.join(raw, "**", "e1_*.json"), recursive=True):
     d = json.load(open(f))
+    d["ops"] = rescore(d)
     e1[(d["system"], d["adversary"])][d["seed"]] = d
 for (s, a), seeds in e1.items():
     key = f"e1.{s}.{a}"
     N[key + ".seeds"] = sorted(seeds)
     N[key + ".items_mean"] = st.mean(d["items"] for d in seeds.values())
+    N[key + ".items_mean_round100"] = round(N[key + ".items_mean"] / 100) * 100  # for "about N items"
     for pos in ("pre", "post"):
         for op in OPS:
             v = []

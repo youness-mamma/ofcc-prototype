@@ -62,6 +62,25 @@ func must(err error) {
 	}
 }
 
+// bucketName makes an S3-valid bucket name: lowercase letters, digits and hyphens, 3-63 characters.
+func bucketName(s string) string {
+	s = strings.ToLower(s)
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') {
+			out = append(out, ch)
+		} else {
+			out = append(out, '-')
+		}
+	}
+	r := strings.Trim(string(out), "-")
+	if len(r) > 63 {
+		r = r[:63]
+	}
+	return r
+}
+
 func salt(s string) int64 { h := fnv.New64a(); h.Write([]byte(s)); return int64(h.Sum64() >> 2) }
 
 func conns(crypto string) *systems.Conns {
@@ -226,7 +245,7 @@ func e1(args []string) {
 	fs.Parse(args)
 	adaptive := *adv == "adaptive"
 	cs := conns(c.crypto)
-	bucket := strings.ToLower(fmt.Sprintf("e1-%s-%d-%s", c.system, c.seed, *adv))
+	bucket := bucketName(fmt.Sprintf("e1-%s-%d-%s", c.system, c.seed, *adv))
 	sys, mode, clp := newSystem(&c, cs, bucket)
 	if clp != nil {
 		defer clp.stop()
@@ -550,7 +569,7 @@ func e2(args []string) {
 	for _, ds := range strings.Split(*dl, ",") {
 		var d int
 		fmt.Sscan(ds, &d)
-		bucket := strings.ToLower(fmt.Sprintf("e2-%s-%d-d%d%s", c.system, c.seed, d, *tag))
+		bucket := bucketName(fmt.Sprintf("e2-%s-%d-d%d%s", c.system, c.seed, d, *tag))
 		sys, mode, clp := newSystem(&c, cs, bucket)
 		gws := make([]*sim.Gateway, c.gws)
 		recs := make([][]*sim.Record, c.gws)
@@ -634,7 +653,7 @@ func e3(args []string) {
 	for _, ls := range strings.Split(*loads, ",") {
 		var L int
 		fmt.Sscan(ls, &L)
-		bucket := strings.ToLower(fmt.Sprintf("e3-%s-%d-l%d%s", c.system, c.seed, L, *tag))
+		bucket := bucketName(fmt.Sprintf("e3-%s-%d-l%d%s", c.system, c.seed, L, *tag))
 		sys, mode, clp := newSystem(&c, cs, bucket)
 		// enough gateways that the generator never becomes the bottleneck (each holds one batch in flight,
 		// so pool >= L * latency / b; we provision for 4 s of latency)

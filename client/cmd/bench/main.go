@@ -206,6 +206,7 @@ type e1Result struct {
 	WallSec    float64           `json:"wall_seconds"`
 	Alerts     []systems.Alert   `json:"alerts"`
 	Incomplete [][2]int64        `json:"incomplete_untouched_sample"`
+	XferErrMsg []string          `json:"transfer_error_messages"`
 }
 
 func e1(args []string) {
@@ -356,6 +357,7 @@ func e1(args []string) {
 		nClean += len(l)
 	}
 	xok, xerr := 0, 0
+	var xmsgs []string
 	var xwg sync.WaitGroup
 	var xmu sync.Mutex
 	sem := make(chan struct{}, 8)
@@ -366,10 +368,19 @@ func e1(args []string) {
 		go func(gi int, a *sim.Record) {
 			defer xwg.Done()
 			defer func() { <-sem }()
-			err := sys.Transfer(gws[gi], a)
+			var err error
+			for try := 0; try < 3; try++ { // retry transient endorsement/commit failures, keep the message
+				if err = sys.Transfer(gws[gi], a); err == nil {
+					break
+				}
+				time.Sleep(time.Second)
+			}
 			xmu.Lock()
 			if err != nil {
 				xerr++
+				if len(xmsgs) < 5 {
+					xmsgs = append(xmsgs, err.Error())
+				}
 			} else {
 				xok++
 			}
@@ -499,7 +510,7 @@ func e1(args []string) {
 		Storage: map[string]int64{"ledger_all_peers": led1 - led0, "offchain": st1 - st0},
 		CPU: map[string]float64{"fabric": cpu1.fabric - cpu0.fabric, "client": cpu1.client - cpu0.client,
 			"minio": cpu1.minio - cpu0.minio, "cl_server": cpu1.clsrv - cpu0.clsrv},
-		WallSec: wall, Alerts: all, Incomplete: incomplete}
+		WallSec: wall, Alerts: all, Incomplete: incomplete, XferErrMsg: xmsgs}
 	if clp != nil {
 		if fi, err := os.Stat(clp.db); err == nil {
 			res.Storage["cl_db"] = fi.Size()

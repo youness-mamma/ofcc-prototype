@@ -1,0 +1,67 @@
+name: pilot
+# Pilot: one dedicated pilot seed (never used for tuning or test), full-size settings, default b=100 and
+# batch timeout 1s (tuning comes later, on validation seeds only). Each job runs on its own runner and
+# compares systems only within that runner.
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "pilot seed"
+        default: "900"
+
+env:
+  FABRIC_VERSION: "2.5.16"
+  FABRIC_CA_VERSION: "1.5.22"
+  INSTALL_SCRIPT_SHA: "f1f5e006a6301b5c98611b24a7ec4aeeda6c283a"
+  MINIO_RELEASE: "RELEASE.2025-10-15T17-29-55Z"
+  SEED: ${{ github.event.inputs.seed }}
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [e1, e2, e3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: client/go.sum
+      - uses: actions/cache@v4
+        with:
+          path: minio-bin
+          key: minio-${{ env.MINIO_RELEASE }}
+      - name: Setup (Fabric, MinIO, bench)
+        run: ./.github/actions-setup.sh
+      - name: Network up (4 orgs, 3 Raft orderers, batch timeout 1s)
+        run: ./network/up.sh 4 1s 100
+      - name: Bootstrap roles
+        run: ./bin/bench bootstrap
+      - name: E1 detection, custody, storage, cost
+        if: matrix.part == 'e1'
+        run: |
+          for s in ofcc noChain noSig noSeq noEnc ha cl; do
+            ./bin/bench e1 -system $s -seed $SEED -adversary adaptive -minio-data minio-data -out results/raw/pilot
+          done
+          for s in ofcc ha cl; do
+            ./bin/bench e1 -system $s -seed $SEED -adversary naive -minio-data minio-data -out results/raw/pilot
+          done
+      - name: E2 sync time vs outage length
+        if: matrix.part == 'e2'
+        run: for s in ofcc ha cl; do ./bin/bench e2 -system $s -seed $SEED -out results/raw/pilot; done
+      - name: E3 throughput and latency
+        if: matrix.part == 'e3'
+        run: for s in ofcc ha cl; do ./bin/bench e3 -system $s -seed $SEED -out results/raw/pilot; done
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker ps -a --format '{{.Names}} {{.Status}}'
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'peer0.org1|orderer0'); do echo "== $c"; docker logs --tail 60 $c 2>&1; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pilot-${{ matrix.part }}
+          path: results/raw/

@@ -1,0 +1,84 @@
+name: test
+# Final runs on TEST seeds 1-5 with the configuration selected on validation seeds (b, batch timeout).
+# Each job compares systems only within its own runner (paired by seed).
+on:
+  workflow_dispatch:
+    inputs:
+      b:
+        description: "selected batch size"
+        required: true
+      bt:
+        description: "selected orderer batch timeout"
+        required: true
+
+env:
+  FABRIC_VERSION: "2.5.16"
+  FABRIC_CA_VERSION: "1.5.22"
+  INSTALL_SCRIPT_SHA: "f1f5e006a6301b5c98611b24a7ec4aeeda6c283a"
+  MINIO_RELEASE: "RELEASE.2025-10-15T17-29-55Z"
+  B: ${{ github.event.inputs.b }}
+  BT: ${{ github.event.inputs.bt }}
+  LOADS: "50,100,200,400,800,1600"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        seed: [1, 2, 3, 4, 5]
+        part: [e1e2, e3, orgs]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: client/go.sum
+      - uses: actions/cache@v4
+        with:
+          path: minio-bin
+          key: minio-${{ env.MINIO_RELEASE }}
+      - name: Setup
+        run: ./.github/actions-setup.sh
+      - name: E1 + E2 (4 orgs)
+        if: matrix.part == 'e1e2'
+        run: |
+          ./network/up.sh 4 $BT 100 && ./bin/bench bootstrap
+          for s in ofcc noChain noSig noSeq noEnc ha cl; do
+            ./bin/bench e1 -system $s -seed ${{ matrix.seed }} -adversary adaptive -b $B -bt $BT -minio-data minio-data -out results/raw/test
+          done
+          for s in ofcc ha cl; do
+            ./bin/bench e1 -system $s -seed ${{ matrix.seed }} -adversary naive -b $B -bt $BT -minio-data minio-data -out results/raw/test
+          done
+          for s in ofcc ha cl; do
+            ./bin/bench e2 -system $s -seed ${{ matrix.seed }} -b $B -bt $BT -out results/raw/test
+          done
+      - name: E3 systems compared (4 orgs)
+        if: matrix.part == 'e3'
+        run: |
+          ./network/up.sh 4 $BT 100 && ./bin/bench bootstrap
+          for s in ofcc ha cl; do
+            ./bin/bench e3 -system $s -seed ${{ matrix.seed }} -loads $LOADS -b $B -bt $BT -out results/raw/test
+            df -h / | tail -1
+          done
+      - name: E3 OFCC with 3, 4, 5 organizations
+        if: matrix.part == 'orgs'
+        run: |
+          for n in 3 4 5; do
+            ./network/down.sh || true
+            ./network/up.sh $n $BT 100 && ./bin/bench bootstrap
+            ./bin/bench e3 -system ofcc -orgs $n -seed ${{ matrix.seed }} -loads $LOADS -b $B -bt $BT -tag _scale -out results/raw/test
+            df -h / | tail -1
+          done
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker ps -a --format '{{.Names}} {{.Status}}'; df -h /
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'peer0.org1|orderer0'); do echo "== $c"; docker logs --tail 40 $c 2>&1; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-${{ matrix.part }}-seed${{ matrix.seed }}
+          path: results/raw/

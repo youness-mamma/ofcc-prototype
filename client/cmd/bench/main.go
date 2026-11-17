@@ -613,7 +613,7 @@ func e3(args []string) {
 	loads := fs.String("loads", "50,100,200,400", "offered loads, items/s")
 	warm := fs.Duration("warmup", 60*time.Second, "")
 	meas := fs.Duration("measure", 180*time.Second, "")
-	pool := fs.Int("pool", 32, "gateways in the load generator")
+	pool := fs.Int("pool", 32, "minimum gateways in the load generator (scaled up with load)")
 	tag := fs.String("tag", "", "")
 	fs.Parse(args)
 	cs := conns(c.crypto)
@@ -636,12 +636,23 @@ func e3(args []string) {
 		fmt.Sscan(ls, &L)
 		bucket := strings.ToLower(fmt.Sprintf("e3-%s-%d-l%d%s", c.system, c.seed, L, *tag))
 		sys, mode, clp := newSystem(&c, cs, bucket)
-		gws := make([]*sim.Gateway, *pool)
-		locks := make([]sync.Mutex, *pool)
+		// enough gateways that the generator never becomes the bottleneck (each holds one batch in flight,
+		// so pool >= L * latency / b; we provision for 4 s of latency)
+		np := *pool
+		if need := (4*L + c.b - 1) / c.b; need > np {
+			np = need
+		}
+		gws := make([]*sim.Gateway, np)
+		locks := make([]sync.Mutex, np)
+		var rwg sync.WaitGroup
+		rsem := make(chan struct{}, 16)
 		for i := range gws {
 			gws[i] = sim.New(i, mode, c.seed+int64(L), salt(bucket))
-			must(sys.Register(gws[i]))
+			rwg.Add(1)
+			rsem <- struct{}{}
+			go func(g *sim.Gateway) { defer rwg.Done(); defer func() { <-rsem }(); must(sys.Register(g)) }(gws[i])
 		}
+		rwg.Wait()
 		interval := time.Duration(float64(time.Second) * float64(c.b) / float64(L))
 		start := time.Now()
 		ws, we := start.Add(*warm), start.Add(*warm+*meas)
@@ -660,7 +671,7 @@ func e3(args []string) {
 			if !gotW0 && !t.Before(ws) {
 				cpuW0, gotW0 = snap(minioPID(), clp), true
 			}
-			gi := next % *pool
+			gi := next % np
 			next++
 			wg.Add(1)
 			go func(sched time.Time, gi int) {
@@ -734,7 +745,7 @@ func e3(args []string) {
 	}
 	writeJSON(c.out, fmt.Sprintf("e3_%s_orgs%d_seed%d%s.json", c.system, c.orgs, c.seed, *tag), map[string]any{
 		"exp": "e3", "system": c.system, "seed": c.seed, "env": env(),
-		"config": map[string]any{"b": c.b, "orgs": c.orgs, "batch_timeout": c.batchTimeout, "pool": *pool,
+		"config": map[string]any{"b": c.b, "orgs": c.orgs, "batch_timeout": c.batchTimeout, "pool_min": *pool, "pool_rule": "max(pool_min, ceil(4*L/b))",
 			"warmup_s": warm.Seconds(), "measure_s": meas.Seconds(),
 			"latency": "batch: commit time minus scheduled submission time (includes queueing and payload upload); item: batch latency plus the time the item waited for its batch to fill at the offered rate"},
 		"rows": rows})

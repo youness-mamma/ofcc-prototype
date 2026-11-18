@@ -154,6 +154,12 @@ for s, byD in e2.items():
     for D, v in byD.items():
         m, sd = ms(list(v.values()))
         N[f"e2.{s}.D{D}"] = {"mean": m, "std": sd, "per_seed": v}
+# linear fit of OFCC sync time over outage length (all lengths), seconds per minute
+for s in ("ofcc", "cls"):
+    pts = [(D, v) for D, byS in e2.get(s, {}).items() for v in byS.values()]
+    if len(pts) > 2:
+        mx = st.mean(p[0] for p in pts); my = st.mean(p[1] for p in pts)
+        N[f"e2.{s}.fit_s_per_min"] = sum((x - mx) * (y - my) for x, y in pts) / sum((x - mx) ** 2 for x, _ in pts)
 for s in ("ha", "cl", "cls"):
     for D in e2.get("ofcc", {}):
         if D in e2.get(s, {}):

@@ -29,7 +29,8 @@ for f in glob.glob(os.path.join(raw, "**", "*.json"), recursive=True):
     d = json.load(open(f))
     if d.get("exp") == "e2":
         for r in d["rows"]:
-            e2[d["system"]][r["outage_min"]].append(r["sync_seconds"])
+            if r["outage_min"] <= 20:  # long outages are reported in the text
+                e2[d["system"]][r["outage_min"]].append(r["sync_seconds"])
     if d.get("exp") == "e3":
         tgt = scal[d["config"]["orgs"]] if "_scale" in os.path.basename(f) else sysl[d["system"]]
         for r in d["rows"]:

@@ -67,6 +67,14 @@ jobs:
             ./bin/bench e3 -system $s -seed ${{ matrix.seed }} -loads $LOADS -b $B -bt $BT -out results/raw/test2
             df -h / | tail -1
           done
+      - name: E2 long outages (4 orgs, OFCC and CL-S)
+        if: matrix.part == 'e2long'
+        run: |
+          ./network/up.sh 4 $BT 100 && ./bin/bench bootstrap
+          mkdir -p results/raw/e2long
+          for s in ofcc cls; do
+            ./bin/bench e2 -system $s -seed ${{ matrix.seed }} -outages 60,180,360 -b $B -bt $BT -out results/raw/e2long
+          done
       - name: Logs on failure
         if: failure()
         run: |

@@ -86,6 +86,7 @@ for (s, a), seeds in e1.items():
                      ("offchain_mb_per_1k", lambda d: d["storage_bytes"].get("offchain", 0) / 2**20 / (d["items"] / 1000)),
                      ("cldb_mb_per_1k", lambda d: d["storage_bytes"].get("cl_db", 0) / 2**20 / (d["items"] / 1000)),
                      ("cpu_s_per_1k", lambda d: sum(d["cpu_seconds"].values()) / (d["items"] / 1000)),
+                     ("cpu_fabric_s_per_1k", lambda d: d["cpu_seconds"].get("fabric", 0) / (d["items"] / 1000)),
                      ("transfers_ok", lambda d: d["transfers_ok"]), ("transfer_errors", lambda d: d["transfer_errors"])):
         v = [fn(d) for d in seeds.values()]
         m, sd = ms(v)
@@ -227,6 +228,27 @@ mb = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * 9.6
 N["derived.link_mb_D20"] = mb
 N["derived.link_minutes_D20_at_4mbit"] = mb * 2**20 * 8 / 4e6 / 60
 N["derived.link_seconds_D20_at_100mbit"] = mb * 2**20 * 8 / 100e6  # LEO-class link, sensitivity
+# ---- catch-up after outages (E2 raw rows): sync rate = items / sync seconds, mean over seeds
+rate = {}
+for f in glob.glob(os.path.join(raw, "**", "e2_ofcc*.json"), recursive=True):
+    d = json.load(open(f))
+    for r in d["rows"]:
+        rate.setdefault(r["outage_min"], []).append(r["items"] / r["sync_seconds"])
+        N.setdefault(f"e2.ofcc.items.D{r['outage_min']}", r["items"])
+for D, v in rate.items():
+    N[f"derived.sync_rate_items_per_s.D{D}"] = st.mean(v)
+if 360 in rate:
+    r360 = st.mean(rate[360])
+    # 10 vessels of eight gateways reconnecting together after six hours, served at the measured 6-h rate
+    N["derived.catchup_10_vessels_6h_items"] = 10 * N["e2.ofcc.items.D360"]
+    N["derived.catchup_10_vessels_6h_minutes"] = 10 * N["e2.ofcc.items.D360"] / r360 / 60
+    # backlog after six hours and its transfer time at 100 Mbit/s
+    gib = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * N["e2.ofcc.items.D360"] / 1000 / 1024
+    N["derived.backlog_6h_gib"] = gib
+    N["derived.backlog_6h_seconds_at_100mbit"] = gib * 2**30 * 8 / 100e6
+# steady-state capacity in vessels of eight gateways at 1 item/s each, at the 400-800 items/s saturation range
+N["derived.vessels_at_400"] = 400 / 8
+N["derived.vessels_at_800"] = 800 / 8
 # offered load expressed in vessels at 8 gateways x 1 item/s per vessel
 N["derived.vessels_at_50"] = 50 / 8
 N["derived.vessels_at_1600"] = 1600 / 8

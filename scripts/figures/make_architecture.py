@@ -116,7 +116,7 @@ logo("miniologo", 596, 286, 84, 13, "minio.svg")
 box("vf", 586, 388, 104, 74, "Verifier tool", BOX_S, "verticalAlign=bottom;spacingBottom=6;")
 icon("i_vf", 622, 394, 32, 32, WORKST, fill=BOX_S[0])
 edge("e_sv", [(638, 366), (638, 388)])
-edge("e_fv", [(320, 379), (578, 379), (578, 425), (586, 425)])
+edge("e_fv", [(570, 456), (586, 456)])
 # people
 box("kh", 10, 500, 200, 40, "Key holder of each organization", BOX_S, "fontSize=14;spacingLeft=24;")
 icon("i_kh", 16, 505, 18, 28, KEY, fill=BOX_S[0])

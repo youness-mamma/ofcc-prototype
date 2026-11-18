@@ -243,23 +243,24 @@ if p50:
     N["derived.catchup_tx_latency_p50_min"] = min(p50)
     N["derived.catchup_tx_latency_p50_max"] = max(p50)
     N["derived.catchup_tx_latency_p95_max"] = max(p95)
-    # commit-phase ceiling: 8 gateways x b=100 items per sequential commit (median commit latency)
-    N["derived.commit_ceiling_items_per_s"] = 8 * 100 / st.mean(p50)
 # split of sync time (per gateway): sync = upfront payload upload + sequential commits + one head query.
 # commit_s ~ (txs/8) x tx_latency_p50 (approximation: per-tx latencies are not stored); rest_s = sync - commit_s
 for sysn in ("ofcc",):
     for D in (20, 360):
-        cs, rs, sh = [], [], []
+        cs, rs, sh, it = [], [], [], []
         for f in glob.glob(os.path.join(raw, "**", f"e2_{sysn}*.json"), recursive=True):
             d = json.load(open(f))
             for r in d["rows"]:
                 if r["outage_min"] == D:
                     c = r["txs"] / 8 * r["tx_latency_p50"]
-                    cs.append(c); rs.append(r["sync_seconds"] - c); sh.append(c / r["sync_seconds"])
+                    cs.append(c); rs.append(r["sync_seconds"] - c); sh.append(c / r["sync_seconds"]); it.append(r["items"])
         if len(cs) > 1:
             N[f"derived.split.{sysn}.D{D}.commit_s"] = {"mean": st.mean(cs), "std": st.stdev(cs)}
-            if D == 360:
-                N[f"derived.split.{sysn}.D{D}.commit_share_pct"] = 100 * st.mean(sh)
+            N[f"derived.split.{sysn}.D{D}.commit_share_pct"] = 100 * st.mean(sh)
+            # commit-phase throughput = items / commit_s (eight gateways, closed loop of eight batches in flight)
+            thr_c = [items / c for items, c in zip(it, cs)]
+            N[f"derived.split.{sysn}.D{D}.commit_thr"] = {"mean": st.mean(thr_c), "std": st.stdev(thr_c), "per_seed": thr_c}
+            N[f"derived.split.{sysn}.D{D}.commit_thr_pct_of_max"] = 100 * st.mean(thr_c) / N["e3.sys.ofcc.orgs4.L1600.throughput_items_per_s"]["mean"]
 if 360 in items_by_D:
     gib = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * items_by_D[360] / 1000 / 1024
     N["derived.backlog_6h_gib"] = gib

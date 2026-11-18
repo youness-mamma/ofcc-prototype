@@ -257,6 +257,7 @@ if 360 in items_by_D:
     N["derived.catchup_10_vessels_6h_minutes_at_max_thr"] = 10 * items_by_D[360] / thr / 60
 # vessel equivalents at 8 items/s per vessel: latency starts rising above 400 items/s; max committed throughput
 N["derived.vessels_at_400"] = 400 / 8
+N["derived.vessels_at_800"] = 800 / 8
 N["derived.vessels_at_max_thr"] = N["e3.sys.ofcc.orgs4.L1600.throughput_items_per_s"]["mean"] / 8
 
 json.dump(N, open(os.path.join(out, "numbers.json"), "w"), indent=1, sort_keys=True, default=str)

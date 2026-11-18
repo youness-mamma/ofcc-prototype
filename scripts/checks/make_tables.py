@@ -12,7 +12,7 @@ from scoring import rescore
 
 T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447}
 OPS = ["modEntry", "modPayload", "delete", "truncate", "insert", "reorder", "replay"]
-OPHDR = ["ME", "MP", "Del", "Tr", "Ins", "Ro", "Rp"]
+OPHDR = ["ME", "MP", "Del", "Tr", "Ins", "Ro", r"Rp$^{*}$"]
 ROWS = [("ofcc", "adaptive", "OFCC"), ("noChain", "adaptive", "noChain"),
         ("noSig", "adaptive", "noSig"), ("noSeq", "adaptive", "noSeq"), ("noProt", "adaptive", "noProt"),
         ("ha", "adaptive", "HA"), ("ha", "naive", "HA"),
@@ -64,6 +64,11 @@ for (s, a), seeds in e1.items():
         m, sd = ms(v)
         N[f"{key}.det.{pos}.all"] = None if m is None else {"mean": m, "std": sd}
         N[f"{key}.ops.{pos}.applied_total"] = sum(sum(1 for o in d["ops"] if o["pos"] == pos and not o.get("na")) for d in seeds.values())
+    # before upload, a replay surfaces only as a duplicate (not applied): reported as neutralized, not detected
+    N[f"{key}.pre.detected_nonreplay_total"] = sum(sum(o["detected"] for o in d["ops"] if o["pos"] == "pre" and not o.get("na") and o["type"] != "replay") for d in seeds.values())
+    N[f"{key}.pre.nonreplay_total"] = sum(sum(1 for o in d["ops"] if o["pos"] == "pre" and not o.get("na") and o["type"] != "replay") for d in seeds.values())
+    N[f"{key}.pre.replay_neutralized_total"] = sum(sum(o["detected"] for o in d["ops"] if o["pos"] == "pre" and not o.get("na") and o["type"] == "replay") for d in seeds.values())
+    N[f"{key}.pre.replay_total"] = sum(sum(1 for o in d["ops"] if o["pos"] == "pre" and not o.get("na") and o["type"] == "replay") for d in seeds.values())
     v = []
     for d in seeds.values():
         ops = [o for o in d["ops"] if o["pos"] == "pre" and not o.get("na")]
@@ -215,6 +220,7 @@ for n in (100, 700):
 mb = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * 9.6
 N["derived.link_mb_D20"] = mb
 N["derived.link_minutes_D20_at_4mbit"] = mb * 2**20 * 8 / 4e6 / 60
+N["derived.link_seconds_D20_at_100mbit"] = mb * 2**20 * 8 / 100e6  # LEO-class link, sensitivity
 # offered load expressed in vessels at 8 gateways x 1 item/s per vessel
 N["derived.vessels_at_50"] = 50 / 8
 N["derived.vessels_at_1600"] = 1600 / 8

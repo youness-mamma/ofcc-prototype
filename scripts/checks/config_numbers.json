@@ -30,5 +30,6 @@
  "+1": "clock skew +1 h (bench eclock)",
  "4.8": "n/a guard",
  "9,600": "derived setting: 8 gateways x 20 min x 60 items/min (bench e2 -outages, -gws)",
- "9600": "derived setting: 8 gateways x 20 min x 60 items/min (bench e2 -outages, -gws)"
+ "9600": "derived setting: 8 gateways x 20 min x 60 items/min (bench e2 -outages, -gws)",
+ "24.04": "VM OS Ubuntu 24.04 (workflows runs-on: ubuntu-24.04)"
 }

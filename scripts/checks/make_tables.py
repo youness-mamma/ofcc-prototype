@@ -231,22 +231,35 @@ N["derived.link_minutes_D20_at_4mbit"] = mb * 2**20 * 8 / 4e6 / 60
 N["derived.link_seconds_D20_at_100mbit"] = mb * 2**20 * 8 / 100e6  # LEO-class link, sensitivity
 # ---- catch-up after outages (E2 raw rows, OFCC). A gateway submits its batches one at a time, each waiting
 # for commit; eight gateways sync in parallel. s per batch per gateway = sync_seconds / (txs / 8).
-spb, p50, p95 = [], [], []
+p50, p95 = [], []
 items_by_D = {}
 for f in glob.glob(os.path.join(raw, "**", "e2_ofcc*.json"), recursive=True):
     d = json.load(open(f))
     for r in d["rows"]:
-        spb.append(r["sync_seconds"] / (r["txs"] / 8))
         p50.append(r["tx_latency_p50"])
         p95.append(r["tx_latency_p95"])
         items_by_D[r["outage_min"]] = r["items"]
-if spb:
-    N["derived.catchup_s_per_batch_per_gw"] = st.mean(spb)
+if p50:
     N["derived.catchup_tx_latency_p50_min"] = min(p50)
     N["derived.catchup_tx_latency_p50_max"] = max(p50)
     N["derived.catchup_tx_latency_p95_max"] = max(p95)
-    # sequential ceiling: 8 gateways x b=100 items per commit round trip
-    N["derived.catchup_ceiling_items_per_s"] = 8 * 100 / st.mean(spb)
+    # commit-phase ceiling: 8 gateways x b=100 items per sequential commit (median commit latency)
+    N["derived.commit_ceiling_items_per_s"] = 8 * 100 / st.mean(p50)
+# split of sync time (per gateway): sync = upfront payload upload + sequential commits + one head query.
+# commit_s ~ (txs/8) x tx_latency_p50 (approximation: per-tx latencies are not stored); rest_s = sync - commit_s
+for sysn in ("ofcc",):
+    for D in (20, 360):
+        cs, rs, sh = [], [], []
+        for f in glob.glob(os.path.join(raw, "**", f"e2_{sysn}*.json"), recursive=True):
+            d = json.load(open(f))
+            for r in d["rows"]:
+                if r["outage_min"] == D:
+                    c = r["txs"] / 8 * r["tx_latency_p50"]
+                    cs.append(c); rs.append(r["sync_seconds"] - c); sh.append(c / r["sync_seconds"])
+        if len(cs) > 1:
+            N[f"derived.split.{sysn}.D{D}.commit_s"] = {"mean": st.mean(cs), "std": st.stdev(cs)}
+            if D == 360:
+                N[f"derived.split.{sysn}.D{D}.commit_share_pct"] = 100 * st.mean(sh)
 if 360 in items_by_D:
     gib = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * items_by_D[360] / 1000 / 1024
     N["derived.backlog_6h_gib"] = gib

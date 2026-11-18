@@ -71,7 +71,8 @@ for (s, a), seeds in e1.items():
     N[f"{key}.pre.replay_total"] = sum(sum(1 for o in d["ops"] if o["pos"] == "pre" and not o.get("na") and o["type"] == "replay") for d in seeds.values())
     v = []
     for d in seeds.values():
-        ops = [o for o in d["ops"] if o["pos"] == "pre" and not o.get("na")]
+        # item-level localisation over the non-replay operations only (replays are neutralized, not detected)
+        ops = [o for o in d["ops"] if o["pos"] == "pre" and not o.get("na") and o["type"] != "replay"]
         v.append(sum(o.get("detected_item", False) for o in ops) / len(ops) if ops else None)
     m, sd = ms(v)
     N[f"{key}.det_item.pre.all"] = None if m is None else {"mean": m, "std": sd}
@@ -221,37 +222,42 @@ for k in [k for k in N if k.startswith("clock.")]:
 
 # ---------------- derived quantities cited in the text
 # exact two-sided 95% Clopper-Pearson lower bound for n successes out of n
-for n in (100, 700):
+for n in (100,):
     N[f"derived.cp_lower_{n}_of_{n}"] = 0.025 ** (1 / n)
 # link volume after the 20-minute outage (9,600 items) and its transfer time at an assumed 4 Mbit/s satellite link
 mb = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * 9.6
 N["derived.link_mb_D20"] = mb
 N["derived.link_minutes_D20_at_4mbit"] = mb * 2**20 * 8 / 4e6 / 60
 N["derived.link_seconds_D20_at_100mbit"] = mb * 2**20 * 8 / 100e6  # LEO-class link, sensitivity
-# ---- catch-up after outages (E2 raw rows): sync rate = items / sync seconds, mean over seeds
-rate = {}
+# ---- catch-up after outages (E2 raw rows, OFCC). A gateway submits its batches one at a time, each waiting
+# for commit; eight gateways sync in parallel. s per batch per gateway = sync_seconds / (txs / 8).
+spb, p50, p95 = [], [], []
+items_by_D = {}
 for f in glob.glob(os.path.join(raw, "**", "e2_ofcc*.json"), recursive=True):
     d = json.load(open(f))
     for r in d["rows"]:
-        rate.setdefault(r["outage_min"], []).append(r["items"] / r["sync_seconds"])
-        N.setdefault(f"e2.ofcc.items.D{r['outage_min']}", r["items"])
-for D, v in rate.items():
-    N[f"derived.sync_rate_items_per_s.D{D}"] = st.mean(v)
-if 360 in rate:
-    r360 = st.mean(rate[360])
-    # 10 vessels of eight gateways reconnecting together after six hours, served at the measured 6-h rate
-    N["derived.catchup_10_vessels_6h_items"] = 10 * N["e2.ofcc.items.D360"]
-    N["derived.catchup_10_vessels_6h_minutes"] = 10 * N["e2.ofcc.items.D360"] / r360 / 60
-    # backlog after six hours and its transfer time at 100 Mbit/s
-    gib = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * N["e2.ofcc.items.D360"] / 1000 / 1024
+        spb.append(r["sync_seconds"] / (r["txs"] / 8))
+        p50.append(r["tx_latency_p50"])
+        p95.append(r["tx_latency_p95"])
+        items_by_D[r["outage_min"]] = r["items"]
+if spb:
+    N["derived.catchup_s_per_batch_per_gw"] = st.mean(spb)
+    N["derived.catchup_tx_latency_p50_min"] = min(p50)
+    N["derived.catchup_tx_latency_p50_max"] = max(p50)
+    N["derived.catchup_tx_latency_p95_max"] = max(p95)
+    # sequential ceiling: 8 gateways x b=100 items per commit round trip
+    N["derived.catchup_ceiling_items_per_s"] = 8 * 100 / st.mean(spb)
+if 360 in items_by_D:
+    gib = N["e1.ofcc.adaptive.link_mb_per_1k"]["mean"] * items_by_D[360] / 1000 / 1024
     N["derived.backlog_6h_gib"] = gib
     N["derived.backlog_6h_seconds_at_100mbit"] = gib * 2**30 * 8 / 100e6
-# steady-state capacity in vessels of eight gateways at 1 item/s each, at the 400-800 items/s saturation range
+    # ten vessels after six hours, bounded below by the highest measured committed throughput (1,600 items/s point)
+    thr = N["e3.sys.ofcc.orgs4.L1600.throughput_items_per_s"]["mean"]
+    N["derived.catchup_10_vessels_6h_items"] = 10 * items_by_D[360]
+    N["derived.catchup_10_vessels_6h_minutes_at_max_thr"] = 10 * items_by_D[360] / thr / 60
+# vessel equivalents at 8 items/s per vessel: latency starts rising above 400 items/s; max committed throughput
 N["derived.vessels_at_400"] = 400 / 8
-N["derived.vessels_at_800"] = 800 / 8
-# offered load expressed in vessels at 8 gateways x 1 item/s per vessel
-N["derived.vessels_at_50"] = 50 / 8
-N["derived.vessels_at_1600"] = 1600 / 8
+N["derived.vessels_at_max_thr"] = N["e3.sys.ofcc.orgs4.L1600.throughput_items_per_s"]["mean"] / 8
 
 json.dump(N, open(os.path.join(out, "numbers.json"), "w"), indent=1, sort_keys=True, default=str)
 print("wrote tables and", len(N), "numbers to", out)
